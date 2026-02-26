@@ -1,8 +1,10 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Copy, Sparkles } from "lucide-react";
 import { generateListings, type OptimizerOutput, type Tone } from "@/lib/productListingOptimizer";
+import UsageLimitGate from "@/components/UsageLimitGate";
+import { getUsageLimitState, recordAnonymousUsage, type UsageLimitState } from "@/lib/usageLimits";
 
 type FormState = {
     productName: string;
@@ -68,10 +70,28 @@ function CopyBlock({ text }: { text: string }) {
 export default function ProductListingOptimizerTool() {
     const [form, setForm] = useState<FormState>(defaultForm);
     const [output, setOutput] = useState<OptimizerOutput | null>(null);
+    const [usage, setUsage] = useState<UsageLimitState>({
+        loading: true,
+        isAuthenticated: false,
+        usedToday: 0,
+        limit: 3,
+        remaining: 3,
+        limitReached: false,
+    });
+
+    useEffect(() => {
+        getUsageLimitState().then(setUsage);
+    }, []);
 
     const generatedAt = useMemo(() => (output ? new Date().toLocaleTimeString() : null), [output]);
 
-    const handleGenerate = () => {
+    const handleGenerate = async () => {
+        if (!usage.isAuthenticated && usage.limitReached) return;
+
+        if (!usage.isAuthenticated) {
+            const next = await recordAnonymousUsage();
+            setUsage(next);
+        }
         const result = generateListings({
             productName: form.productName,
             brand: form.brand,
@@ -94,6 +114,9 @@ export default function ProductListingOptimizerTool() {
             <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm space-y-4">
                 <h2 className="text-xl font-bold text-slate-900">Product Brief</h2>
                 <p className="text-sm text-slate-600">Add your product details once and generate sales-ready listings for every marketplace.</p>
+                {!usage.loading && !usage.isAuthenticated && (
+                    <p className="text-xs text-slate-500">Free usage: {usage.usedToday}/{usage.limit} used today across all tools.</p>
+                )}
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     {[
@@ -172,10 +195,13 @@ export default function ProductListingOptimizerTool() {
                 <button
                     type="button"
                     onClick={handleGenerate}
-                    className="inline-flex items-center justify-center gap-2 rounded-full bg-[#566AF0] px-5 py-2.5 text-white font-semibold hover:bg-indigo-700"
+                    disabled={!usage.loading && !usage.isAuthenticated && usage.limitReached}
+                    className="inline-flex items-center justify-center gap-2 rounded-full bg-[#566AF0] px-5 py-2.5 text-white font-semibold hover:bg-indigo-700 disabled:opacity-60 disabled:cursor-not-allowed"
                 >
                     <Sparkles className="h-4 w-4" /> Generate listings
                 </button>
+
+                {!usage.loading && !usage.isAuthenticated && usage.limitReached && <UsageLimitGate />}
             </div>
 
             <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
