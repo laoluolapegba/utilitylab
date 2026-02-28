@@ -1,11 +1,10 @@
 // lib/ocr/getProvider.ts
 
 import { IOcrProvider } from "./ocrProvider";
-import { TesseractProvider } from "./tesseractProvider";
 import { GoogleVisionProvider } from "./googleVisionProvider";
 import { TextractProvider } from "./textractProvider";
 
-export type ProviderName = "tesseract" | "google" | "textract";
+export type ProviderName = "google" | "textract";
 
 export function getProvider(name: ProviderName): IOcrProvider {
     switch (name) {
@@ -13,8 +12,7 @@ export function getProvider(name: ProviderName): IOcrProvider {
             return new GoogleVisionProvider();
         case "textract":
             return new TextractProvider();
-        case "tesseract":
         default:
-            return new TesseractProvider();
+            return new GoogleVisionProvider();
     }
 }
