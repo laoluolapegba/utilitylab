@@ -6,7 +6,7 @@ import { getProvider, ProviderName } from "@/lib/ocr/getProvider";
 type ProviderRequest = ProviderName | "auto";
 
 function getFallbackChain(primary: ProviderName): ProviderName[] {
-    const all: ProviderName[] = ["tesseract", "google", "textract"];
+    const all: ProviderName[] = ["google", "textract"];
     return [primary, ...all.filter((p) => p !== primary)];
 }
 
@@ -34,7 +34,7 @@ function pickAutoProvider(fileName: string): ProviderName {
     if (visionHints.some((k) => name.includes(k))) return "google";
 
     // Default safe pick
-    return "tesseract";
+    return "google";
 }
 
 export async function POST(req: NextRequest) {
