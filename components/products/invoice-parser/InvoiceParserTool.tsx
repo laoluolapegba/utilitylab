@@ -1,6 +1,9 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+
+import UsageLimitGate from "@/components/UsageLimitGate";
+import { getUsageLimitState, recordAnonymousUsage, type UsageLimitState } from "@/lib/usageLimits";
 
 type LineItem = {
     description: string;
@@ -104,6 +107,18 @@ export default function InvoiceParserTool() {
     const [chat, setChat] = useState<ChatMessage[]>([]);
     const [asking, setAsking] = useState(false);
     const [outputFormat, setOutputFormat] = useState<OutputFormat>("journal");
+    const [usage, setUsage] = useState<UsageLimitState>({
+        loading: true,
+        isAuthenticated: false,
+        usedToday: 0,
+        limit: 3,
+        remaining: 3,
+        limitReached: false,
+    });
+
+    useEffect(() => {
+        getUsageLimitState().then(setUsage);
+    }, []);
 
     const outputPreview = useMemo(() => {
         if (!draft) return "";
@@ -159,6 +174,15 @@ export default function InvoiceParserTool() {
 
     const onFilePick = async (file: File) => {
         setExtractError(null);
+        if (!usage.isAuthenticated && usage.limitReached) {
+            setExtractError("Daily free limit reached. Please sign up to continue.");
+            return;
+        }
+
+        if (!usage.isAuthenticated) {
+            const next = await recordAnonymousUsage();
+            setUsage(next);
+        }
         if (!["application/pdf", "image/png", "image/jpeg", "image/jpg"].includes(file.type)) {
             setExtractError("Please upload a PDF, PNG, or JPG file.");
             return;
@@ -257,6 +281,16 @@ export default function InvoiceParserTool() {
                 🔒 Privacy-first: Processed in-memory and never stored.
             </div>
 
+            {!usage.loading && !usage.isAuthenticated && (
+                <p className="mb-4 text-xs text-slate-500">Free usage: {usage.usedToday}/{usage.limit} used today across all tools.</p>
+            )}
+
+            {!usage.loading && !usage.isAuthenticated && usage.limitReached && (
+                <div className="mb-4">
+                    <UsageLimitGate />
+                </div>
+            )}
+
             <div className="mb-8 flex flex-wrap gap-2 text-sm">
                 {[1, 2, 3, 4].map((n) => (
                     <span key={n} className={`px-3 py-1 rounded-full border ${step >= n ? "bg-[#566AF0] text-white border-[#566AF0]" : "bg-white text-slate-500 border-slate-300"}`}>
@@ -275,7 +309,7 @@ export default function InvoiceParserTool() {
                         <p className="mt-2 text-sm text-slate-500">PDF, PNG, JPG up to 10MB. Tap to choose file.</p>
                         {selectedFile && <p className="mt-4 text-sm text-slate-600">Selected: {selectedFile.name}</p>}
                     </label>
-                    <input id="invoice-file" type="file" accept="application/pdf,image/png,image/jpeg" className="hidden" onChange={(e) => e.target.files?.[0] && onFilePick(e.target.files[0])} capture="environment" />
+                    <input id="invoice-file" type="file" accept="application/pdf,image/png,image/jpeg" className="hidden" onChange={(e) => e.target.files?.[0] && onFilePick(e.target.files[0])} capture="environment" disabled={!usage.loading && !usage.isAuthenticated && usage.limitReached} />
                     {isExtracting && <p className="mt-4 text-sm text-slate-600">Processing invoice...</p>}
                     {extractError && <p className="mt-4 text-sm text-red-600">{extractError}</p>}
                 </div>

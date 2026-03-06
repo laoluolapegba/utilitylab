@@ -33,8 +33,8 @@ function pickAutoProvider(input: {
 
     if (isHighRes && isPageLike) return "textract";
 
-    // Otherwise default to Vision (best general OCR incl handwriting)
-    return "google";
+    // Default safe pick
+    return "tesseract";
 }
 
 

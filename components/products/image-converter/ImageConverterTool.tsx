@@ -7,6 +7,9 @@ import Preview from "@/components/products/image-converter/Preview";
 import DownloadPanel from "@/components/products/image-converter/DownloadPanel";
 import { processBatch, type BatchProgress } from "@/lib/image-converter/batchProcessor";
 import { type ConversionResult, type OutputFormat } from "@/lib/image-converter/converter";
+import UsageLimitGate from "@/components/UsageLimitGate";
+import { getUsageLimitState, recordAnonymousUsage, type UsageLimitState } from "@/lib/usageLimits";
+import { useEffect } from "react";
 
 export default function ImageConverterTool() {
     const [files, setFiles] = useState<File[]>([]);
@@ -19,11 +22,32 @@ export default function ImageConverterTool() {
     const [quality, setQuality] = useState(0.85);
     const [maxWidth, setMaxWidth] = useState("");
     const [maxHeight, setMaxHeight] = useState("");
+    const [usage, setUsage] = useState<UsageLimitState>({
+        loading: true,
+        isAuthenticated: false,
+        usedToday: 0,
+        limit: 3,
+        remaining: 3,
+        limitReached: false,
+    });
+
+    useEffect(() => {
+        getUsageLimitState().then(setUsage);
+    }, []);
 
     const hasFiles = files.length > 0;
 
     const convert = async () => {
         if (!files.length) return;
+
+        if (!usage.isAuthenticated && usage.limitReached) {
+            return;
+        }
+
+        if (!usage.isAuthenticated) {
+            const next = await recordAnonymousUsage();
+            setUsage(next);
+        }
 
         setIsConverting(true);
         setResults([]);
@@ -77,17 +101,22 @@ export default function ImageConverterTool() {
                     <p className="text-sm text-slate-600">
                         {files.length} file(s) selected • {(totalInputSize / 1024 / 1024).toFixed(2)} MB total
                     </p>
+                    {!usage.loading && !usage.isAuthenticated && (
+                        <p className="text-xs text-slate-500 mt-1">Free usage: {usage.usedToday}/{usage.limit} today</p>
+                    )}
                 </div>
 
                 <button
                     type="button"
-                    disabled={!hasFiles || isConverting}
+                    disabled={!hasFiles || isConverting || (!usage.loading && !usage.isAuthenticated && usage.limitReached)}
                     onClick={convert}
                     className="inline-flex items-center justify-center px-5 py-2.5 rounded-full bg-[#566AF0] text-white font-medium hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                     {isConverting ? "Converting..." : "Convert images"}
                 </button>
             </div>
+
+            {!usage.loading && !usage.isAuthenticated && usage.limitReached && <UsageLimitGate />}
 
             {progress && (
                 <div className="rounded-2xl bg-white border border-slate-200 p-4">

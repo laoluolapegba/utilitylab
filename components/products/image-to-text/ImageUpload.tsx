@@ -3,6 +3,8 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
+import UsageLimitGate from "@/components/UsageLimitGate";
+import { getUsageLimitState, recordAnonymousUsage } from "@/lib/usageLimits";
 
 const DAILY_LIMIT = 3;
 const SUPPORTED_FORMATS = "PNG, JPG, JPEG, WEBP";
@@ -23,10 +25,6 @@ interface UploadItem {
     provider?: ProviderName;
     retryCount?: number;
     createdAt?: string;
-}
-
-function todayISO() {
-    return new Date().toISOString().slice(0, 10); // YYYY-MM-DD (UTC)
 }
 
 async function getImageDimensions(file: File): Promise<{ width: number; height: number }> {
@@ -114,28 +112,8 @@ export default function ImageUpload() {
         const loadUsage = async () => {
             setLimitError(null);
             try {
-                const { data: auth } = await supabase.auth.getUser();
-                const user = auth.user;
-                if (!user) {
-                    setUploadsUsedToday(0);
-                    return;
-                }
-
-                const { data, error } = await supabase
-                    .from("usage_daily")
-                    .select("used_count")
-                    .eq("user_id", user.id)
-                    .eq("usage_date", todayISO())
-                    .maybeSingle();
-
-                if (error) {
-                    console.error("Error loading usage_daily:", error);
-                    setLimitError("Could not load usage info. You can still upload.");
-                    setUploadsUsedToday(0);
-                    return;
-                }
-
-                setUploadsUsedToday(data?.used_count ?? 0);
+                const usage = await getUsageLimitState();
+                setUploadsUsedToday(usage.isAuthenticated ? null : usage.usedToday);
             } catch (e) {
                 console.error("Unexpected error loading usage:", e);
                 setLimitError("Could not load usage info. You can still upload.");
@@ -318,33 +296,8 @@ export default function ImageUpload() {
         }
     };
 
-    const bumpDailyUsage = async (): Promise<number | null> => {
-        try {
-            const { data: auth } = await supabase.auth.getUser();
-            const user = auth.user;
-            if (!user) return null;
-
-            const next = (uploadsUsedToday ?? 0) + 1;
-
-            const { error } = await supabase
-                .from("usage_daily")
-                .upsert({ user_id: user.id, usage_date: todayISO(), used_count: next }, { onConflict: "user_id,usage_date" });
-
-            if (error) {
-                console.error("Failed to update usage_daily:", error);
-                return null;
-            }
-
-            setUploadsUsedToday(next);
-            return next;
-        } catch (e) {
-            console.error("Failed to update usage_daily:", e);
-            return null;
-        }
-    };
-
     const processFile = async (id: string, file: File) => {
-        // hard block if daily limit already reached
+        // hard block if daily limit already reached for anonymous users
         if (uploadsUsedToday !== null && uploadsUsedToday >= DAILY_LIMIT) {
             updateItem(id, { status: "limit", error: "Daily limit reached." });
             return;
@@ -436,8 +389,10 @@ export default function ImageUpload() {
                 provider: providerUsed,
             });
 
-            // enforce quota across devices (only on success)
-            await bumpDailyUsage();
+            if (uploadsUsedToday !== null) {
+                const next = await recordAnonymousUsage();
+                setUploadsUsedToday(next.usedToday);
+            }
 
             // log analytics (no content)
             await logOcrEvent({
@@ -582,7 +537,7 @@ export default function ImageUpload() {
             <div className="rounded-2xl bg-white/40 border border-white/40 backdrop-blur-xl px-4 py-3 flex flex-col md:flex-row md:items-center md:justify-between gap-3">
                 <div>
                     <h2 className="text-sm font-semibold text-slate-900">Daily usage</h2>
-                    <p className="text-xs text-slate-600">Free tier: {DAILY_LIMIT} successful image-to-text conversions per day.</p>
+                    <p className="text-xs text-slate-600">{uploadsUsedToday === null ? "Signed in: unlimited usage enabled." : `Anonymous plan: ${DAILY_LIMIT} total tool runs per day.`}</p>
                     <p className="text-xs text-slate-500 mt-1">
                         Provider: <span className="font-medium">Auto (Vision ↔ Textract)</span>
                     </p>
@@ -590,13 +545,15 @@ export default function ImageUpload() {
 
                 <div className="flex flex-col items-end gap-2">
                     <p className="text-xs text-slate-900 font-medium">
-                        {uploadsUsedToday === null ? "Loading..." : `${uploadsUsedToday}/${DAILY_LIMIT} used today`}
+                        {uploadsUsedToday === null ? "Unlimited" : `${uploadsUsedToday}/${DAILY_LIMIT} used today`}
                     </p>
 
                     {limitError && <p className="text-[11px] text-amber-700 text-right">{limitError}</p>}
 
                     {limitReached && (
-                        <p className="text-[11px] text-red-600 text-right">Limit reached for today. New uploads will be blocked.</p>
+                        <div className="w-full max-w-md">
+                            <UsageLimitGate />
+                        </div>
                     )}
 
                     {items.length > 0 && (
