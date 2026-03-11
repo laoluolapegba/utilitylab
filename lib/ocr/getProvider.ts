@@ -1,18 +1,22 @@
 // lib/ocr/getProvider.ts
 
 import { IOcrProvider } from "./ocrProvider";
-import { GoogleVisionProvider } from "./googleVisionProvider";
-import { TextractProvider } from "./textractProvider";
 
 export type ProviderName = "google" | "textract";
 
-export function getProvider(name: ProviderName): IOcrProvider {
+export async function getProvider(name: ProviderName): Promise<IOcrProvider> {
     switch (name) {
-        case "google":
+        case "google": {
+            const { GoogleVisionProvider } = await import("./googleVisionProvider");
             return new GoogleVisionProvider();
-        case "textract":
+        }
+        case "textract": {
+            const { TextractProvider } = await import("./textractProvider");
             return new TextractProvider();
-        default:
+        }
+        default: {
+            const { GoogleVisionProvider } = await import("./googleVisionProvider");
             return new GoogleVisionProvider();
+        }
     }
 }

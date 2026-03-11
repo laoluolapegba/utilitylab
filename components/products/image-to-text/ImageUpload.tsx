@@ -316,6 +316,16 @@ export default function ImageUpload() {
             width = dims.width;
             height = dims.height;
 
+            console.group(`[OCR Upload] ${file.name}`);
+            console.log("Starting upload", {
+                fileName: file.name,
+                fileType: file.type,
+                fileSize: file.size,
+                width,
+                height,
+                itemId: id,
+            });
+
             const res = await fetch("/api/extract-text", {
                 method: "POST",
                 headers: {
@@ -327,7 +337,25 @@ export default function ImageUpload() {
                 body: form,
             });
 
-            const json = await res.json();
+            console.log("Response received", {
+                status: res.status,
+                ok: res.ok,
+                contentType: res.headers.get("content-type"),
+            });
+
+            let json: any = null;
+            const contentType = res.headers.get("content-type") || "";
+
+            if (contentType.includes("application/json")) {
+                json = await res.json();
+                console.log("Response JSON", json);
+            } else {
+                const text = await res.text();
+                console.error("Non-JSON response body", text);
+                throw new Error(`Expected JSON but got: ${contentType || "unknown content type"}`);
+            }
+
+            console.groupEnd();
 
             if (!res.ok || json.error) {
                 const msg = json?.error || "OCR failed. Try a clearer image.";
@@ -409,12 +437,27 @@ export default function ImageUpload() {
 
             showToast(`Text extracted (${providerUsed === "google" ? "Vision" : "Textract"}).`, "success");
         } catch (err) {
-            console.error("Upload error", err);
+            console.group(`[OCR Upload Error] ${file.name}`);
+            console.error("Unexpected client error", err);
+
+            if (err instanceof Error) {
+                console.error("Error message:", err.message);
+                console.error("Stack:", err.stack);
+            }
+
+            console.log("File context", {
+                fileName: file.name,
+                fileType: file.type,
+                fileSize: file.size,
+                width,
+                height,
+                itemId: id,
+            });
+            console.groupEnd();
 
             updateItem(id, { status: "error", error: "Something went wrong uploading this file." });
             showToast("Something went wrong processing one of the files.", "error");
 
-            // best-effort analytics for unexpected errors
             try {
                 await logOcrEvent({
                     file,
@@ -425,11 +468,9 @@ export default function ImageUpload() {
                     hasText: null,
                     textLength: null,
                     isSuccess: false,
-                    errorMessage: "Unexpected client error",
+                    errorMessage: err instanceof Error ? err.message : "Unexpected client error",
                 });
-            } catch {
-                // ignore
-            }
+            } catch { }
         }
     };
 

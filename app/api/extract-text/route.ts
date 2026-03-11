@@ -2,6 +2,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { getProvider, ProviderName } from "@/lib/ocr/getProvider";
+
 export const runtime = "nodejs";
 
 function allowedProviders(): ProviderName[] {
@@ -13,66 +14,109 @@ function pickAutoProvider(input: {
     width?: number;
     height?: number;
     bytes?: number;
-}): ProviderName {
+}): { primary: ProviderName; reason: string } {
     const name = (input.fileName || "").toLowerCase();
     const w = input.width ?? 0;
     const h = input.height ?? 0;
+    const bytes = input.bytes ?? 0;
 
-    // Filename hints → strong signal for Textract
     const textractHints = ["receipt", "invoice", "bill", "statement", "vat", "tax", "total", "order", "payment"];
-    if (textractHints.some((k) => name.includes(k))) return "textract";
+    if (textractHints.some((k) => name.includes(k))) {
+        return { primary: "textract", reason: "filename_hint" };
+    }
 
-    // Document-ish heuristic:
-    // - high resolution AND
-    // - portrait-ish (typical scan/photo of a page)
-    const isHighRes = Math.max(w, h) >= 1400;
-    const aspect = w > 0 && h > 0 ? Math.max(w, h) / Math.min(w, h) : 1;
-    const isPageLike = aspect >= 1.2 && aspect <= 1.7; // rough A4-ish / phone doc-ish
+    const longestSide = Math.max(w, h);
+    const shortestSide = Math.min(w, h) || 1;
+    const aspect = longestSide / shortestSide;
 
-    if (isHighRes && isPageLike) return "textract";
+    const isHighRes = longestSide >= 1400;
+    const isPortraitish = h >= w;
+    const isPageLike = aspect >= 1.2 && aspect <= 1.8;
+    const isLargeFile = bytes >= 1_000_000;
 
-    // Default safe pick
-    return "tesseract";
+    if ((isHighRes && isPageLike && isPortraitish) || (isHighRes && isLargeFile && isPageLike)) {
+        return { primary: "textract", reason: "document_heuristic" };
+    }
+
+    return { primary: "google", reason: "default_general_image" };
 }
-
 
 function buildChain(primary: ProviderName): ProviderName[] {
     const allowed = allowedProviders();
-    // ensure primary is first, then the remaining allowed providers
     const chain = [primary, ...allowed.filter((p) => p !== primary)];
-    // also ensure primary is allowed; if not, fallback to first allowed
     return allowed.includes(primary) ? chain : allowed;
 }
 
 export async function POST(req: NextRequest) {
+    const requestId = `ocr_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+
+    console.log(`[OCR][${requestId}] Request received`);
+
     try {
         const formData = await req.formData();
         const file = formData.get("file") as File | null;
 
         if (!file) {
+            console.warn(`[OCR][${requestId}] No file provided`);
             return NextResponse.json({ error: "No file provided." }, { status: 400 });
         }
 
+        console.log(`[OCR][${requestId}] File received`, {
+            name: file.name,
+            type: file.type,
+            size: file.size,
+        });
+
         const buffer = Buffer.from(await file.arrayBuffer());
 
-        // Always AUTO (no header needed)
         const w = Number(req.headers.get("x-image-width") || 0) || undefined;
         const h = Number(req.headers.get("x-image-height") || 0) || undefined;
         const bytes = Number(req.headers.get("x-file-bytes") || 0) || undefined;
         const fileName = (req.headers.get("x-file-name") || file.name) as string;
 
+        console.log(`[OCR][${requestId}] Header metadata`, {
+            width: w,
+            height: h,
+            bytes,
+            fileName,
+        });
+
         const primary = pickAutoProvider({ fileName, width: w, height: h, bytes });
         const chain = buildChain(primary);
 
-        let lastError: any = null;
+        console.log(`[OCR][${requestId}] Provider selection`, {
+            primary,
+            attemptedProviders: chain,
+        });
+
+        let lastError: unknown = null;
 
         for (const providerName of chain) {
+            const start = Date.now();
+            console.log(`[OCR][${requestId}] Trying provider`, providerName);
+
             try {
-                const provider = getProvider(providerName);
+                const provider = await getProvider(providerName);
+
+                console.log(`[OCR][${requestId}] Provider instance created`, providerName);
+
                 const result = await provider.extract(buffer);
                 const text = (result.rawText || "").trim();
 
+                console.log(`[OCR][${requestId}] Provider result`, {
+                    providerName,
+                    durationMs: Date.now() - start,
+                    textLength: text.length,
+                    confidence: result.confidence ?? null,
+                    hasText: text.length > 0,
+                });
+
                 if (text.length > 0) {
+                    console.log(`[OCR][${requestId}] Success`, {
+                        providerUsed: providerName,
+                        attemptedProviders: chain,
+                    });
+
                     return NextResponse.json(
                         {
                             rawText: result.rawText,
@@ -82,14 +126,28 @@ export async function POST(req: NextRequest) {
                         },
                         { status: 200 }
                     );
-                } else {
-                    lastError = new Error("No text found by " + providerName);
                 }
+
+                lastError = new Error(`No text found by ${providerName}`);
             } catch (err) {
-                console.error(`[OCR] Provider ${providerName} failed:`, err);
+                console.error(`[OCR][${requestId}] Provider ${providerName} failed`, err);
+
+                if (err instanceof Error) {
+                    console.error(`[OCR][${requestId}] Provider error details`, {
+                        providerName,
+                        message: err.message,
+                        stack: err.stack,
+                    });
+                }
+
                 lastError = err;
             }
         }
+
+        console.warn(`[OCR][${requestId}] All providers failed`, {
+            attemptedProviders: chain,
+            lastError: lastError instanceof Error ? lastError.message : String(lastError),
+        });
 
         return NextResponse.json(
             {
@@ -99,10 +157,18 @@ export async function POST(req: NextRequest) {
             },
             { status: 502 }
         );
-    } catch (err: any) {
-        console.error("OCR route error:", err);
+    } catch (err) {
+        console.error(`[OCR][${requestId}] Route-level failure`, err);
+
+        if (err instanceof Error) {
+            console.error(`[OCR][${requestId}] Route error details`, {
+                message: err.message,
+                stack: err.stack,
+            });
+        }
+
         return NextResponse.json(
-            { error: "OCR error", detail: err?.message ?? "Unknown error" },
+            { error: "OCR error", detail: err instanceof Error ? err.message : "Unknown error" },
             { status: 500 }
         );
     }
