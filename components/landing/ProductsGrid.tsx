@@ -23,14 +23,14 @@ const products = [
         features: ["Multi-language support", "High accuracy OCR", "Batch processing"]
     },
     {
-        id: "pdf-to-accounting",
-        name: "PDF to Accounting",
-        description: "Convert invoices, receipts, and statements into structured accounting data.",
+        id: "invoice-journal",
+        name: "Invoice to Journal Entries",
+        description: "Turn UK invoices into balanced journal entries with VAT, CIS, and plain-English guidance.",
         icon: FileText,
-        status: "coming-soon",
-        href: "#",
+        status: "live",
+        href: "/tools/invoice-journal",
         color: "from-green-500 to-emerald-600",
-        features: ["Auto-categorization", "Multi-currency", "Excel export"]
+        features: ["What's reclaimable", "CIS + VAT guidance", "Journal exports"]
     },
     {
         id: "image-converter",
