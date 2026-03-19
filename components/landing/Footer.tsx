@@ -21,13 +21,13 @@ export default function Footer() {
                 {/* CTA in Footer */}
                 <div className="text-center mb-16 max-w-2xl mx-auto">
                     <h2 className="text-3xl font-bold text-[#0F172A] mb-4">
-                        Want to grow your business with us? Download now.
+                        Ready to Get Started?
                     </h2>
                     <p className="text-slate-600 mb-8">
-                        Focused tools for focused people. Get started today and reclaim your productivity.
+                        Pick the UtilityLab tool that fits your workflow and start using it in minutes.
                     </p>
-                    <Link href="/get-started" className="inline-flex items-center justify-center rounded-full bg-[#566AF0] px-8 py-3 text-sm font-medium text-white shadow-lg transition-colors hover:bg-[#4355d6] btn-shadow">
-                        Get started Free
+                    <Link href="/#products" className="inline-flex items-center justify-center rounded-full bg-[#566AF0] px-8 py-3 text-sm font-medium text-white shadow-lg transition-colors hover:bg-[#4355d6] btn-shadow">
+                        Explore Tools
                     </Link>
                 </div>
 

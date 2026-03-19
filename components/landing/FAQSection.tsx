@@ -10,7 +10,7 @@ const faqs = [
     },
     {
         question: "Which tools are currently available?",
-        answer: "Image to Text is live and ready to use with 3 free conversions daily. We're actively developing PDF to Accounting, Image Format Converter, E-commerce tools, and UK Compliance Form Generator."
+        answer: "Invoice Parser, Image to Text, Image Format Converter, E-commerce Product Optimizer, Re-Pricing Alerts, and the Compliance Form Generator are all available from the homepage."
     },
     {
         question: "Is my data safe and private?",
