@@ -58,7 +58,7 @@ const products = [
         description: "Browser extension that monitors competitor prices and sends instant alerts.",
         icon: Bell,
         status: "live",
-        href: "/repricing-alerts",
+        href: "/app/repricing-alerts",
         color: "from-cyan-500 to-blue-600",
         features: ["Real-time monitoring", "Custom thresholds", "Multi-marketplace"]
     },
@@ -68,7 +68,7 @@ const products = [
         description: "Generate UK-compliant forms for micro-businesses instantly.",
         icon: FileCheck,
         status: "live",
-        href: "/compliance-form-generator",
+        href: "/app/compliance-form-generator",
         color: "from-indigo-500 to-purple-600",
         features: ["HMRC compliant", "Auto-fill", "PDF export"]
     }
