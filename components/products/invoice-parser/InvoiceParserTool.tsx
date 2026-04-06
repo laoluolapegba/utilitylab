@@ -5,6 +5,10 @@ import { useEffect, useMemo, useState } from "react";
 import UsageLimitGate from "@/components/UsageLimitGate";
 import { getUsageLimitState, recordAnonymousUsage, type UsageLimitState } from "@/lib/usageLimits";
 
+function generateCorrelationId(): string {
+    return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
+}
+
 type LineItem = {
     description: string;
     amount: string;
@@ -175,6 +179,7 @@ export default function InvoiceParserTool() {
     }, [analysis, draft, outputFormat]);
 
     const onFilePick = async (file: File) => {
+        const correlationId = generateCorrelationId();
         setExtractError(null);
         if (!usage.isAuthenticated && usage.limitReached) {
             setExtractError("Daily free limit reached. Please sign up to continue.");
@@ -195,16 +200,33 @@ export default function InvoiceParserTool() {
 
         try {
             if (!usage.isAuthenticated) {
-                console.log("[InvoiceParser] Recording anonymous usage...");
-                const next = await recordAnonymousUsage();
-                setUsage(next);
-                console.log("[InvoiceParser] Anonymous usage recorded:", next);
+                await recordAnonymousUsage().then(setUsage);
             }
 
             const form = new FormData();
             form.append("file", file);
 
-            const res = await fetch("/api/extract-text", { method: "POST", body: form, headers: { "x-file-name": file.name } });
+            console.info("[invoice-parser]", {
+                stage: "extract_fetch",
+                correlationId,
+                url: "/api/extract-text",
+                payload: { fileName: file.name, fileSize: file.size, fileType: file.type },
+            });
+
+            const res = await fetch("/api/extract-text", {
+                method: "POST",
+                body: form,
+                headers: { "x-file-name": file.name, "x-correlation-id": correlationId },
+            });
+            const serverCorrelationId = res.headers.get("x-correlation-id");
+
+            console.info("[invoice-parser]", {
+                stage: "extract_response",
+                correlationId,
+                status: res.status,
+                serverCorrelationId,
+            });
+
             const data = await res.json();
             if (!res.ok) throw new Error(data?.detail || data?.error || "Failed to extract text.");
 
@@ -215,7 +237,16 @@ export default function InvoiceParserTool() {
             setDraft(buildFallbackDraft(extractedText));
             setStep(2);
         } catch (err) {
-            setExtractError(err instanceof Error ? err.message : "Extraction failed.");
+            const errorType = err instanceof TypeError ? "network" : "http";
+            const message = err instanceof Error ? err.message : "Extraction failed.";
+            console.error("[invoice-parser]", {
+                stage: "extract_error",
+                correlationId,
+                errorType,
+                message,
+                hint: errorType === "network" ? "Request never reached the server — check connectivity or CORS" : "Server returned a non-OK response",
+            });
+            setExtractError(message);
         } finally {
             setIsExtracting(false);
         }
@@ -223,20 +254,46 @@ export default function InvoiceParserTool() {
 
     const analyzeInvoice = async () => {
         if (!draft) return;
+        const correlationId = generateCorrelationId();
         setIsAnalyzing(true);
         setAnalysisError(null);
         try {
+            console.info("[invoice-parser]", {
+                stage: "analyze_fetch",
+                correlationId,
+                url: "/api/invoice-analyze",
+                payload: { hasRawText: rawText.length > 0, rawTextLength: rawText.length, invoiceKeys: Object.keys(draft) },
+            });
+
             const res = await fetch("/api/invoice-analyze", {
                 method: "POST",
-                headers: { "Content-Type": "application/json" },
+                headers: { "Content-Type": "application/json", "x-correlation-id": correlationId },
                 body: JSON.stringify({ rawText, invoice: draft }),
             });
+            const serverCorrelationId = res.headers.get("x-correlation-id");
+
+            console.info("[invoice-parser]", {
+                stage: "analyze_response",
+                correlationId,
+                status: res.status,
+                serverCorrelationId,
+            });
+
             const data = await res.json();
             if (!res.ok) throw new Error(data?.error || "Analysis failed.");
             setAnalysis(data.analysis);
             setStep(3);
         } catch (err) {
-            setAnalysisError(err instanceof Error ? err.message : "Failed to analyze invoice.");
+            const errorType = err instanceof TypeError ? "network" : "http";
+            const message = err instanceof Error ? err.message : "Failed to analyze invoice.";
+            console.error("[invoice-parser]", {
+                stage: "analyze_error",
+                correlationId,
+                errorType,
+                message,
+                hint: errorType === "network" ? "Request never reached the server — check connectivity or CORS" : "Server returned a non-OK response",
+            });
+            setAnalysisError(message);
         } finally {
             setIsAnalyzing(false);
         }
@@ -244,22 +301,47 @@ export default function InvoiceParserTool() {
 
     const askQuestion = async () => {
         if (!question.trim() || !draft) return;
+        const correlationId = generateCorrelationId();
         const q = question.trim();
         setQuestion("");
         setAsking(true);
         setChat((prev) => [...prev, { role: "user", content: q }]);
 
         try {
+            console.info("[invoice-parser]", {
+                stage: "qa_fetch",
+                correlationId,
+                url: "/api/invoice-analyze",
+                payload: { questionLength: q.length, hasAnalysis: !!analysis, invoiceKeys: Object.keys(draft) },
+            });
+
             const res = await fetch("/api/invoice-analyze", {
                 method: "POST",
-                headers: { "Content-Type": "application/json" },
+                headers: { "Content-Type": "application/json", "x-correlation-id": correlationId },
                 body: JSON.stringify({ rawText, invoice: draft, question: q, analysis }),
             });
+            const serverCorrelationId = res.headers.get("x-correlation-id");
+
+            console.info("[invoice-parser]", {
+                stage: "qa_response",
+                correlationId,
+                status: res.status,
+                serverCorrelationId,
+            });
+
             const data = await res.json();
             if (!res.ok) throw new Error(data?.error || "Unable to answer right now.");
             setChat((prev) => [...prev, { role: "assistant", content: data.answer || "I couldn't generate an answer." }]);
         } catch (err) {
+            const errorType = err instanceof TypeError ? "network" : "http";
             const message = err instanceof Error ? err.message : "Unable to answer right now.";
+            console.error("[invoice-parser]", {
+                stage: "qa_error",
+                correlationId,
+                errorType,
+                message,
+                hint: errorType === "network" ? "Request never reached the server — check connectivity or CORS" : "Server returned a non-OK response",
+            });
             setChat((prev) => [...prev, { role: "assistant", content: message }]);
         } finally {
             setAsking(false);
