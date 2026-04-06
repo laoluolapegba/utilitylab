@@ -54,9 +54,13 @@ export type UsageLimitState = {
 };
 
 export async function getUsageLimitState(): Promise<UsageLimitState> {
-    const {
-        data: { user },
-    } = await supabase.auth.getUser();
+    let user = null;
+    try {
+        const { data } = await supabase.auth.getUser();
+        user = data?.user ?? null;
+    } catch {
+        // Network failure or auth service unavailable — treat as anonymous
+    }
 
     if (user) {
         return {

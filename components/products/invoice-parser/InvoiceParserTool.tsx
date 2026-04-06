@@ -117,7 +117,9 @@ export default function InvoiceParserTool() {
     });
 
     useEffect(() => {
-        getUsageLimitState().then(setUsage);
+        getUsageLimitState().then(setUsage).catch(() => {
+            setUsage((prev) => ({ ...prev, loading: false }));
+        });
     }, []);
 
     const outputPreview = useMemo(() => {
@@ -304,12 +306,20 @@ export default function InvoiceParserTool() {
                     <label
                         htmlFor="invoice-file"
                         className="block cursor-pointer rounded-xl border-2 border-dashed border-slate-300 p-10 text-center hover:border-[#566AF0] transition"
+                        onDragOver={(e) => { e.preventDefault(); e.currentTarget.classList.add("border-[#566AF0]"); }}
+                        onDragLeave={(e) => { e.currentTarget.classList.remove("border-[#566AF0]"); }}
+                        onDrop={(e) => {
+                            e.preventDefault();
+                            e.currentTarget.classList.remove("border-[#566AF0]");
+                            const file = e.dataTransfer.files?.[0];
+                            if (file) onFilePick(file);
+                        }}
                     >
                         <p className="text-lg font-semibold text-slate-800">Drop invoice PDF/image here</p>
                         <p className="mt-2 text-sm text-slate-500">PDF, PNG, JPG up to 10MB. Tap to choose file.</p>
                         {selectedFile && <p className="mt-4 text-sm text-slate-600">Selected: {selectedFile.name}</p>}
                     </label>
-                    <input id="invoice-file" type="file" accept="application/pdf,image/png,image/jpeg" className="hidden" onChange={(e) => e.target.files?.[0] && onFilePick(e.target.files[0])} capture="environment" disabled={!usage.loading && !usage.isAuthenticated && usage.limitReached} />
+                    <input id="invoice-file" type="file" accept="application/pdf,image/png,image/jpeg" className="hidden" onChange={(e) => e.target.files?.[0] && onFilePick(e.target.files[0])} disabled={!usage.loading && !usage.isAuthenticated && usage.limitReached} />
                     {isExtracting && <p className="mt-4 text-sm text-slate-600">Processing invoice...</p>}
                     {extractError && <p className="mt-4 text-sm text-red-600">{extractError}</p>}
                 </div>
@@ -392,7 +402,7 @@ export default function InvoiceParserTool() {
                         <p className="text-sm"><span className="font-medium">VAT reclaimable:</span> {analysis.vatReclaimableAmount}</p>
                         <p className="text-sm"><span className="font-medium">Category:</span> {analysis.category}</p>
                         <p className="text-sm"><span className="font-medium">UK accounting code:</span> {analysis.ukAccountingCode}</p>
-                        {analysis.warnings.length > 0 && (
+                        {(analysis.warnings?.length ?? 0) > 0 && (
                             <ul className="list-disc ml-5 text-sm text-amber-700">
                                 {analysis.warnings.map((w) => <li key={w}>{w}</li>)}
                             </ul>

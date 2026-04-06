@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ArrowRight, ImageIcon, FileText, Layers, ShoppingCart, Bell, FileCheck, ReceiptText } from "lucide-react";
+import { ArrowRight, ImageIcon, Layers, ShoppingCart, Bell, FileCheck, ReceiptText } from "lucide-react";
 
 const products = [
     {
@@ -21,16 +21,6 @@ const products = [
         href: "/app/image-to-text",
         color: "from-blue-500 to-indigo-600",
         features: ["Multi-language support", "High accuracy OCR", "Batch processing"]
-    },
-    {
-        id: "pdf-to-accounting",
-        name: "PDF to Accounting",
-        description: "Convert invoices, receipts, and statements into structured accounting data.",
-        icon: FileText,
-        status: "coming-soon",
-        href: "#",
-        color: "from-green-500 to-emerald-600",
-        features: ["Auto-categorization", "Multi-currency", "Excel export"]
     },
     {
         id: "image-converter",
@@ -58,7 +48,7 @@ const products = [
         description: "Browser extension that monitors competitor prices and sends instant alerts.",
         icon: Bell,
         status: "live",
-        href: "/repricing-alerts",
+        href: "/app/repricing-alerts",
         color: "from-cyan-500 to-blue-600",
         features: ["Real-time monitoring", "Custom thresholds", "Multi-marketplace"]
     },
@@ -67,8 +57,8 @@ const products = [
         name: "Compliance Form Generator",
         description: "Generate UK-compliant forms for micro-businesses instantly.",
         icon: FileCheck,
-        status: "live",
-        href: "/compliance-form-generator",
+        status: "coming-soon",
+        href: "/app/compliance-form-generator",
         color: "from-indigo-500 to-purple-600",
         features: ["HMRC compliant", "Auto-fill", "PDF export"]
     }
