@@ -181,10 +181,6 @@ export default function InvoiceParserTool() {
             return;
         }
 
-        if (!usage.isAuthenticated) {
-            const next = await recordAnonymousUsage();
-            setUsage(next);
-        }
         if (!["application/pdf", "image/png", "image/jpeg", "image/jpg"].includes(file.type)) {
             setExtractError("Please upload a PDF, PNG, or JPG file.");
             return;
@@ -198,6 +194,13 @@ export default function InvoiceParserTool() {
         setIsExtracting(true);
 
         try {
+            if (!usage.isAuthenticated) {
+                console.log("[InvoiceParser] Recording anonymous usage...");
+                const next = await recordAnonymousUsage();
+                setUsage(next);
+                console.log("[InvoiceParser] Anonymous usage recorded:", next);
+            }
+
             const form = new FormData();
             form.append("file", file);
 
