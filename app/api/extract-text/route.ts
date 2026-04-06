@@ -2,6 +2,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { getProvider, ProviderName } from "@/lib/ocr/getProvider";
+import { createLogger, generateCorrelationId } from "@/lib/logger";
 
 export const runtime = "nodejs";
 
@@ -48,20 +49,26 @@ function buildChain(primary: ProviderName): ProviderName[] {
 }
 
 export async function POST(req: NextRequest) {
-    const requestId = `ocr_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const correlationId = req.headers.get("x-correlation-id") ?? generateCorrelationId();
+    const log = createLogger(correlationId);
+    const requestStart = Date.now();
 
-    console.log(`[OCR][${requestId}] Request received`);
+    log("request_received").info("POST /api/extract-text", { durationMs: 0 });
 
     try {
         const formData = await req.formData();
         const file = formData.get("file") as File | null;
 
         if (!file) {
-            console.warn(`[OCR][${requestId}] No file provided`);
-            return NextResponse.json({ error: "No file provided." }, { status: 400 });
+            log("request_parsed").warn("No file provided", { durationMs: Date.now() - requestStart });
+            return NextResponse.json(
+                { error: "No file provided.", correlationId },
+                { status: 400, headers: { "x-correlation-id": correlationId } },
+            );
         }
 
-        console.log(`[OCR][${requestId}] File received`, {
+        log("request_parsed").info("File received", {
+            durationMs: Date.now() - requestStart,
             name: file.name,
             type: file.type,
             size: file.size,
@@ -74,7 +81,8 @@ export async function POST(req: NextRequest) {
         const bytes = Number(req.headers.get("x-file-bytes") || 0) || undefined;
         const fileName = (req.headers.get("x-file-name") || file.name) as string;
 
-        console.log(`[OCR][${requestId}] Header metadata`, {
+        log("header_parsed").info("Header metadata extracted", {
+            durationMs: Date.now() - requestStart,
             width: w,
             height: h,
             bytes,
@@ -84,37 +92,41 @@ export async function POST(req: NextRequest) {
         const primary = pickAutoProvider({ fileName, width: w, height: h, bytes });
         const chain = buildChain(primary);
 
-        console.log(`[OCR][${requestId}] Provider selection`, {
-            primary,
-            attemptedProviders: chain,
+        log("provider_selected").info("Provider chain built", {
+            durationMs: Date.now() - requestStart,
+            primary: primary.primary,
+            reason: primary.reason,
+            chain,
         });
 
         let lastError: unknown = null;
 
         for (const providerName of chain) {
-            const start = Date.now();
-            console.log(`[OCR][${requestId}] Trying provider`, providerName);
+            const providerStart = Date.now();
+
+            log("provider_attempt").info("Trying provider", {
+                durationMs: Date.now() - requestStart,
+                providerName,
+            });
 
             try {
                 const provider = await getProvider(providerName);
-
-                console.log(`[OCR][${requestId}] Provider instance created`, providerName);
-
                 const result = await provider.extract(buffer);
                 const text = (result.rawText || "").trim();
 
-                console.log(`[OCR][${requestId}] Provider result`, {
+                log("provider_result").info("Provider returned result", {
+                    durationMs: Date.now() - providerStart,
                     providerName,
-                    durationMs: Date.now() - start,
                     textLength: text.length,
                     confidence: result.confidence ?? null,
                     hasText: text.length > 0,
                 });
 
                 if (text.length > 0) {
-                    console.log(`[OCR][${requestId}] Success`, {
+                    log("request_complete").info("OCR succeeded", {
+                        durationMs: Date.now() - requestStart,
                         providerUsed: providerName,
-                        attemptedProviders: chain,
+                        chain,
                     });
 
                     return NextResponse.json(
@@ -124,29 +136,25 @@ export async function POST(req: NextRequest) {
                             providerUsed: providerName,
                             attemptedProviders: chain,
                         },
-                        { status: 200 }
+                        { status: 200, headers: { "x-correlation-id": correlationId } },
                     );
                 }
 
                 lastError = new Error(`No text found by ${providerName}`);
             } catch (err) {
-                console.error(`[OCR][${requestId}] Provider ${providerName} failed`, err);
-
-                if (err instanceof Error) {
-                    console.error(`[OCR][${requestId}] Provider error details`, {
-                        providerName,
-                        message: err.message,
-                        stack: err.stack,
-                    });
-                }
-
+                log("provider_failed").error("Provider threw an error", {
+                    durationMs: Date.now() - providerStart,
+                    providerName,
+                    error: err instanceof Error ? err : new Error(String(err)),
+                });
                 lastError = err;
             }
         }
 
-        console.warn(`[OCR][${requestId}] All providers failed`, {
-            attemptedProviders: chain,
-            lastError: lastError instanceof Error ? lastError.message : String(lastError),
+        log("request_failed").warn("All providers exhausted", {
+            durationMs: Date.now() - requestStart,
+            chain,
+            error: lastError instanceof Error ? lastError : new Error(String(lastError)),
         });
 
         return NextResponse.json(
@@ -154,22 +162,23 @@ export async function POST(req: NextRequest) {
                 error: "All OCR providers failed or found no text.",
                 detail: lastError instanceof Error ? lastError.message : String(lastError),
                 attemptedProviders: chain,
+                correlationId,
             },
-            { status: 502 }
+            { status: 502, headers: { "x-correlation-id": correlationId } },
         );
     } catch (err) {
-        console.error(`[OCR][${requestId}] Route-level failure`, err);
-
-        if (err instanceof Error) {
-            console.error(`[OCR][${requestId}] Route error details`, {
-                message: err.message,
-                stack: err.stack,
-            });
-        }
+        log("request_failed").error("Unhandled route-level error", {
+            durationMs: Date.now() - requestStart,
+            error: err instanceof Error ? err : new Error(String(err)),
+        });
 
         return NextResponse.json(
-            { error: "OCR error", detail: err instanceof Error ? err.message : "Unknown error" },
-            { status: 500 }
+            {
+                error: "OCR error",
+                detail: err instanceof Error ? err.message : "Unknown error",
+                correlationId,
+            },
+            { status: 500, headers: { "x-correlation-id": correlationId } },
         );
     }
 }
