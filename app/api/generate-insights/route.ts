@@ -3,6 +3,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getProvider, ProviderName } from "@/lib/ocr/getProvider";
 import { createLogger, generateCorrelationId } from "@/lib/logger";
+import { extractIdentity, checkLimit, recordUsage } from "@/lib/usageTracking";
 
 type ProviderRequest = ProviderName | "auto";
 
@@ -29,6 +30,13 @@ export async function POST(req: NextRequest) {
     const requestStart = Date.now();
 
     log("request_received").info("POST /api/generate-insights", { durationMs: 0 });
+
+    const { userId, anonId } = await extractIdentity(req);
+    const { allowed, used, limit } = await checkLimit(userId, anonId);
+    if (!allowed) {
+        return NextResponse.json({ upgradeRequired: true, used, limit }, { status: 429 });
+    }
+    await recordUsage("generate-insights", userId, anonId);
 
     try {
         const formData = await req.formData();

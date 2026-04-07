@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import OpenAI from "openai";
 import { createLogger, generateCorrelationId } from "@/lib/logger";
+import { extractIdentity, checkLimit, recordUsage } from "@/lib/usageTracking";
 
 export const runtime = "nodejs";
 
@@ -196,6 +197,13 @@ export async function POST(req: NextRequest) {
     log("request_received").info("POST /api/invoice-analyze", {
         durationMs: 0,
     });
+
+    const { userId, anonId } = await extractIdentity(req);
+    const { allowed, used, limit } = await checkLimit(userId, anonId);
+    if (!allowed) {
+        return NextResponse.json({ upgradeRequired: true, used, limit }, { status: 429 });
+    }
+    await recordUsage("invoice-parser", userId, anonId);
 
     try {
         const body = (await req.json()) as InvoiceBody;
