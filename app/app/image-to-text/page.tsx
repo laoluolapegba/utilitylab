@@ -14,7 +14,6 @@ export default function ImageToTextPage() {
             <MarketingNavbar />
             <main className="min-h-screen bg-white">
                 <ImageToTextHero />
-                <HowItWorks />
                 <section id="tool" className="py-20 lg:py-28 bg-gradient-to-br from-slate-50 via-white to-slate-50">
                     <div className="container mx-auto px-4 sm:px-6 lg:px-8">
                         <div className="text-center mb-12">
@@ -31,6 +30,7 @@ export default function ImageToTextPage() {
                         </div>
                     </div>
                 </section>
+                <HowItWorks />
                 <ImageToTextFeatures />
                 <UseCases />
                 <PricingSection />

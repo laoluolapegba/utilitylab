@@ -36,6 +36,7 @@ export default function MarketingNavbar() {
             await supabase.auth.signOut();
             setIsAuthenticated(false);
             router.push("/");
+            router.refresh();
         } catch (error) {
             console.error("Sign out error:", error);
         }
@@ -65,10 +66,16 @@ export default function MarketingNavbar() {
                         Products
                     </Link>
                     <Link
-                        href="/#pricing"
+                        href="/pricing"
                         className="text-sm font-medium text-slate-600 hover:text-slate-900 transition"
                     >
                         Pricing
+                    </Link>
+                    <Link
+                        href="/#ideas"
+                        className="text-sm font-medium text-slate-600 hover:text-slate-900 transition"
+                    >
+                        Share idea
                     </Link>
 
                     {isAuthenticated === null ? (
@@ -80,6 +87,12 @@ export default function MarketingNavbar() {
                     ) : isAuthenticated ? (
                         // Logged in state
                         <>
+                            <Link
+                                href="/account"
+                                className="text-sm font-medium text-slate-600 hover:text-slate-900 transition"
+                            >
+                                Account
+                            </Link>
                             <button
                                 onClick={handleSignOut}
                                 className="text-sm font-medium text-slate-600 hover:text-slate-900 transition"
@@ -142,11 +155,18 @@ export default function MarketingNavbar() {
                                 Products
                             </Link>
                             <Link
-                                href="/#pricing"
+                                href="/pricing"
                                 className="text-sm font-medium text-slate-700 hover:text-slate-900 py-2"
                                 onClick={() => setOpen(false)}
                             >
                                 Pricing
+                            </Link>
+                            <Link
+                                href="/#ideas"
+                                className="text-sm font-medium text-slate-700 hover:text-slate-900 py-2"
+                                onClick={() => setOpen(false)}
+                            >
+                                Share idea
                             </Link>
 
                             <div className="border-t border-slate-200 my-2" />
@@ -160,6 +180,13 @@ export default function MarketingNavbar() {
                             ) : isAuthenticated ? (
                                 // Logged in state
                                 <>
+                                    <Link
+                                        href="/account"
+                                        className="text-sm font-medium text-slate-700 hover:text-slate-900 py-2"
+                                        onClick={() => setOpen(false)}
+                                    >
+                                        Account
+                                    </Link>
                                     <button
                                         onClick={() => {
                                             handleSignOut();
