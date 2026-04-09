@@ -42,6 +42,6 @@ export default function ImageToTextPage() {
 }
 
 export const metadata = {
-    title: "Image to Text Converter - Extract Text from Images | Utility Lab",
-    description: "Professional OCR tool to extract text from images instantly. Multi-language support, high accuracy, and privacy-first. Free 3 conversions daily.",
+    title: "Image to Text — free OCR for receipts and documents | UtilityLab",
+    description: "Extract text from any image instantly — receipts, screenshots, handwritten notes — with professional-grade OCR, free to start.",
 };

@@ -3,9 +3,8 @@ import Footer from "@/components/landing/Footer";
 import ProductListingOptimizerTool from "@/components/products/product-listing/ProductListingOptimizerTool";
 
 export const metadata = {
-    title: "E-commerce Product Listing Optimizer | UtilityLab",
-    description:
-        "Turn product specs into SEO-optimized listings for Amazon, eBay, Shopify, Etsy, WooCommerce, and Facebook Marketplace in seconds.",
+    title: "Product Listing Optimiser — free AI listing generator for sellers | UtilityLab",
+    description: "Turn product specs into SEO-optimised listings for Amazon, eBay, Shopify, and Etsy in seconds — free for online sellers.",
 };
 
 export default function ProductListingOptimizerPage() {

@@ -3,8 +3,8 @@ import Footer from "@/components/landing/Footer";
 import InvoiceParserTool from "@/components/products/invoice-parser/InvoiceParserTool";
 
 export const metadata = {
-    title: "Invoice Parser for UK Freelancers | UtilityLab",
-    description: "Upload PDF/image invoices to extract line items, VAT info, AI explanations, and accounting-ready exports.",
+    title: "Invoice Parser — free invoice OCR and tax analysis | UtilityLab",
+    description: "Upload PDF or image invoices to extract line items, VAT details, and accounting-ready exports — free for freelancers and small businesses.",
 };
 
 export default function InvoiceParserPage() {

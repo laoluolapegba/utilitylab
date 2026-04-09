@@ -10,6 +10,10 @@ import UpgradeModal from "@/components/UpgradeModal";
 const DAILY_LIMIT = 3;
 const SUPPORTED_FORMATS = "PNG, JPG, JPEG, WEBP";
 
+function generateCorrelationId(): string {
+    return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
+}
+
 type ToastType = "success" | "error" | "info";
 type ProviderName = "google" | "textract";
 type ItemStatus = "pending" | "processing" | "done" | "error" | "limit";
@@ -23,6 +27,7 @@ interface UploadItem {
     text?: string;
     confidence?: number | null;
     error?: string | null;
+    errorCorrelationId?: string | null;
     provider?: ProviderName;
     retryCount?: number;
     createdAt?: string;
@@ -299,13 +304,15 @@ export default function ImageUpload() {
     };
 
     const processFile = async (id: string, file: File) => {
+        const correlationId = generateCorrelationId();
+
         // hard block if daily limit already reached for anonymous users
         if (uploadsUsedToday !== null && uploadsUsedToday >= DAILY_LIMIT) {
             updateItem(id, { status: "limit", error: "Daily limit reached." });
             return;
         }
 
-        updateItem(id, { status: "processing", error: null });
+        updateItem(id, { status: "processing", error: null, errorCorrelationId: null });
 
         const form = new FormData();
         form.append("file", file);
@@ -339,6 +346,8 @@ export default function ImageUpload() {
                 authHeaders["Authorization"] = `Bearer ${authSession.access_token}`;
             }
 
+            authHeaders["x-correlation-id"] = correlationId;
+
             const res = await fetch("/api/extract-text", {
                 method: "POST",
                 headers: authHeaders,
@@ -366,7 +375,7 @@ export default function ImageUpload() {
             console.groupEnd();
 
             if (res.status === 429 && json?.upgradeRequired) {
-                updateItem(id, { status: "limit", error: "Daily limit reached." });
+                updateItem(id, { status: "limit", error: "Daily limit reached.", errorCorrelationId: correlationId });
                 setUpgradeModal({ used: json.used ?? 3, limit: json.limit ?? 3 });
                 return;
             }
@@ -375,7 +384,7 @@ export default function ImageUpload() {
                 const msg = json?.error || "OCR failed. Try a clearer image.";
                 console.error("OCR failed:", json);
 
-                updateItem(id, { status: "error", error: msg });
+                updateItem(id, { status: "error", error: msg, errorCorrelationId: correlationId });
                 showToast("OCR failed for one of the images.", "error");
 
                 await logOcrEvent({
@@ -469,7 +478,7 @@ export default function ImageUpload() {
             });
             console.groupEnd();
 
-            updateItem(id, { status: "error", error: "Something went wrong uploading this file." });
+            updateItem(id, { status: "error", error: "Something went wrong uploading this file.", errorCorrelationId: correlationId });
             showToast("Something went wrong processing one of the files.", "error");
 
             try {
@@ -739,7 +748,14 @@ export default function ImageUpload() {
                                                     return conf ? <span>Confidence {conf}</span> : null;
                                                 })()}
 
-                                            {item.status === "error" && <span className="text-red-600">Error</span>}
+                                            {item.status === "error" && (
+                                                <span className="flex flex-col gap-0.5">
+                                                    <span className="text-red-600">Error</span>
+                                                    {item.errorCorrelationId && (
+                                                        <span className="text-xs text-slate-400">Ref: {item.errorCorrelationId}</span>
+                                                    )}
+                                                </span>
+                                            )}
                                             {item.status === "limit" && <span className="text-red-600">Daily limit</span>}
 
                                             {item.provider && (
