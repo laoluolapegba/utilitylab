@@ -87,7 +87,7 @@ export async function POST(req: NextRequest) {
             });
 
             try {
-                const provider = await getProvider(providerName);
+                const provider = await getProvider(providerName); // This may throw if provider is misconfigured
                 const result = await provider.extract(buffer);
                 const text = (result.rawText || "").trim();
 
