@@ -109,5 +109,12 @@ export async function createZipBlob(files: Array<{ name: string; blob: Blob }>) 
     writeUint32(endView, 16, centralOffset);
     writeUint16(endView, 20, 0);
 
-    return new Blob([...localChunks, ...centralChunks, end], { type: "application/zip" });
+    return new Blob(
+        [...localChunks, ...centralChunks, end].map(chunk =>
+            chunk instanceof Uint8Array
+                ? new Uint8Array(chunk.buffer as ArrayBuffer, chunk.byteOffset, chunk.byteLength)
+                : chunk
+        ),
+        { type: "application/zip" }
+    );
 }

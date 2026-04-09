@@ -6,7 +6,9 @@
         "dev": "next dev",
         "build": "next build",
         "start": "next start",
-        "lint": "eslint"
+        "typecheck": "tsc --noEmit",
+        "lint": "eslint",
+        "check": "tsc --noEmit && next lint"
     },
     "dependencies": {
         "@aws-sdk/client-textract": "^3.948.0",
@@ -35,6 +37,7 @@
         "dotenv": "^17.2.3",
         "eslint": "^9",
         "eslint-config-next": "16.0.5",
+        "husky": "^9.1.7",
         "tailwindcss": "^4.1.18",
         "typescript": "5.9.3"
     }
