@@ -3,9 +3,8 @@ import Footer from "@/components/landing/Footer";
 import ImageConverterTool from "@/components/products/image-converter/ImageConverterTool";
 
 export const metadata = {
-    title: "Image Format Converter - 100% Client-side | UtilityLab",
-    description:
-        "Convert images between PNG, JPG, WEBP, GIF, BMP, TIFF, ICO, and AVIF instantly in your browser. Batch conversion, quality control, resize, and ZIP downloads.",
+    title: "Image Converter — free image format conversion in your browser | UtilityLab",
+    description: "Convert images between PNG, JPG, WEBP, AVIF, and 15+ formats instantly — fully client-side, nothing uploaded to any server.",
 };
 
 export default function ImageConverterPage() {

@@ -7,9 +7,8 @@ import ProductFAQ from "@/components/products/repricing-alerts/ProductFAQ";
 import Footer from "@/components/landing/Footer";
 
 export const metadata = {
-    title: "Re-Pricing Alerts | UtilityLab",
-    description:
-        "Monitor competitor prices across Amazon, eBay, Shopify, and any website. Get instant alerts within minutes and react before you lose sales.",
+    title: "Re-Pricing Alerts — free competitor price monitoring for sellers | UtilityLab",
+    description: "Monitor competitor prices across Amazon, eBay, and Shopify and get instant alerts the moment they change — free for online sellers.",
 };
 
 export default function RepricingAlertsPage() {

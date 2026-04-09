@@ -101,11 +101,14 @@ export default function InvoiceParserTool() {
     const [provider, setProvider] = useState<string>("");
     const [isExtracting, setIsExtracting] = useState(false);
     const [extractError, setExtractError] = useState<string | null>(null);
+    const [extractCorrelationId, setExtractCorrelationId] = useState<string | null>(null);
 
     const [draft, setDraft] = useState<InvoiceDraft | null>(null);
     const [analysis, setAnalysis] = useState<AnalysisResult | null>(null);
     const [isAnalyzing, setIsAnalyzing] = useState(false);
     const [analysisError, setAnalysisError] = useState<string | null>(null);
+    const [analysisCorrelationId, setAnalysisCorrelationId] = useState<string | null>(null);
+    const [qaCorrelationId, setQaCorrelationId] = useState<string | null>(null);
 
     const [question, setQuestion] = useState("");
     const [chat, setChat] = useState<ChatMessage[]>([]);
@@ -247,6 +250,7 @@ export default function InvoiceParserTool() {
                 hint: errorType === "network" ? "Request never reached the server — check connectivity or CORS" : "Server returned a non-OK response",
             });
             setExtractError(message);
+            setExtractCorrelationId(correlationId);
         } finally {
             setIsExtracting(false);
         }
@@ -294,6 +298,7 @@ export default function InvoiceParserTool() {
                 hint: errorType === "network" ? "Request never reached the server — check connectivity or CORS" : "Server returned a non-OK response",
             });
             setAnalysisError(message);
+            setAnalysisCorrelationId(correlationId);
         } finally {
             setIsAnalyzing(false);
         }
@@ -342,6 +347,7 @@ export default function InvoiceParserTool() {
                 message,
                 hint: errorType === "network" ? "Request never reached the server — check connectivity or CORS" : "Server returned a non-OK response",
             });
+            setQaCorrelationId(correlationId);
             setChat((prev) => [...prev, { role: "assistant", content: message }]);
         } finally {
             setAsking(false);
@@ -358,7 +364,10 @@ export default function InvoiceParserTool() {
         setAnalysis(null);
         setChat([]);
         setExtractError(null);
+        setExtractCorrelationId(null);
         setAnalysisError(null);
+        setAnalysisCorrelationId(null);
+        setQaCorrelationId(null);
         setOutputFormat("journal");
     };
 
@@ -406,7 +415,12 @@ export default function InvoiceParserTool() {
                     </label>
                     <input id="invoice-file" type="file" accept="application/pdf,image/png,image/jpeg" className="hidden" onChange={(e) => e.target.files?.[0] && onFilePick(e.target.files[0])} disabled={!usage.loading && !usage.isAuthenticated && usage.limitReached} />
                     {isExtracting && <p className="mt-4 text-sm text-slate-600">Processing invoice...</p>}
-                    {extractError && <p className="mt-4 text-sm text-red-600">{extractError}</p>}
+                    {extractError && (
+                        <div className="mt-4">
+                            <p className="text-sm text-red-600">{extractError}</p>
+                            {extractCorrelationId && <p className="text-xs text-slate-400 mt-0.5">Ref: {extractCorrelationId}</p>}
+                        </div>
+                    )}
                 </div>
             )}
 
@@ -474,7 +488,12 @@ export default function InvoiceParserTool() {
                         </button>
                     )}
 
-                    {analysisError && <p className="text-sm text-red-600">{analysisError}</p>}
+                    {analysisError && (
+                        <div>
+                            <p className="text-sm text-red-600">{analysisError}</p>
+                            {analysisCorrelationId && <p className="text-xs text-slate-400 mt-0.5">Ref: {analysisCorrelationId}</p>}
+                        </div>
+                    )}
                 </div>
             )}
 
@@ -501,12 +520,18 @@ export default function InvoiceParserTool() {
                             <button onClick={askQuestion} disabled={asking} className="rounded-lg bg-slate-900 text-white px-4 py-2 text-sm disabled:opacity-70">Ask</button>
                         </div>
                         <div className="mt-4 space-y-3">
-                            {chat.map((m, idx) => (
-                                <div key={idx} className={`rounded-lg px-3 py-2 text-sm ${m.role === "user" ? "bg-blue-50 text-blue-900" : "bg-slate-100 text-slate-800"}`}>
-                                    <strong className="mr-1">{m.role === "user" ? "You:" : "AI:"}</strong>
-                                    {m.content}
-                                </div>
-                            ))}
+                            {chat.map((m, idx) => {
+                                const isLastAssistant = m.role === "assistant" && idx === chat.length - 1;
+                                return (
+                                    <div key={idx} className={`rounded-lg px-3 py-2 text-sm ${m.role === "user" ? "bg-blue-50 text-blue-900" : "bg-slate-100 text-slate-800"}`}>
+                                        <strong className="mr-1">{m.role === "user" ? "You:" : "AI:"}</strong>
+                                        {m.content}
+                                        {isLastAssistant && qaCorrelationId && (
+                                            <p className="text-xs text-slate-400 mt-0.5">Ref: {qaCorrelationId}</p>
+                                        )}
+                                    </div>
+                                );
+                            })}
                         </div>
                     </div>
 

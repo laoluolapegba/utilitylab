@@ -3,7 +3,7 @@ import { Check, Bell, Clock3, Globe2, LineChart, ShieldCheck, Zap } from "lucide
 const features = [
     {
         title: "Real-time monitoring",
-        description: "Detects price changes in minutes with checks every 5-15 minutes depending on your plan.",
+        description: "Detects price changes quickly and delivers alerts before your competitors can react.",
         icon: Clock3,
     },
     {
@@ -34,8 +34,8 @@ const features = [
 ];
 
 const sellingPoints = [
-    "Faster setup than repricing suites",
-    "Affordable monthly plans starting at £9",
+    "Faster setup than full repricing suites",
+    "Included in your UtilityLab plan",
     "More control than auto-repricing",
     "More reliable than manual checking",
     "Tracks stock + shipping + total price",
