@@ -97,13 +97,14 @@ export async function POST(req: NextRequest) {
             fileName,
         });
 
-        const primary = pickAutoProvider({ fileName, width: w, height: h, bytes });
+
+        const { primary, reason } = pickAutoProvider({ fileName, width: w, height: h, bytes });
         const chain = buildChain(primary);
 
         log("provider_selected").info("Provider chain built", {
             durationMs: Date.now() - requestStart,
-            primary: primary.primary,
-            reason: primary.reason,
+            provider: primary,
+            reason,
             chain,
         });
 
