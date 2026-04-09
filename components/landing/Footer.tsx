@@ -1,6 +1,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import { Twitter, Linkedin, Github } from "lucide-react";
+import IdeaSubmissionForm from "@/components/IdeaSubmissionForm";
 
 export default function Footer() {
     return (
@@ -29,6 +30,15 @@ export default function Footer() {
                     <Link href="/get-started" className="inline-flex items-center justify-center rounded-full bg-[#566AF0] px-8 py-3 text-sm font-medium text-white shadow-lg transition-colors hover:bg-[#4355d6] btn-shadow">
                         Get started Free
                     </Link>
+                </div>
+
+                {/* Idea submission */}
+                <div id="ideas" className="mb-16 max-w-lg mx-auto">
+                    <div className="text-center mb-6">
+                        <h3 className="text-lg font-bold text-[#0F172A] mb-1">Got a feature idea?</h3>
+                        <p className="text-sm text-slate-500">Tell us what you'd like built next.</p>
+                    </div>
+                    <IdeaSubmissionForm />
                 </div>
 
                 <div className="border-t border-slate-200 pt-8 flex flex-col md:flex-row items-center justify-between gap-6">

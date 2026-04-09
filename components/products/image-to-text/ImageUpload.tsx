@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import UsageLimitGate from "@/components/UsageLimitGate";
 import { getUsageLimitState, recordAnonymousUsage } from "@/lib/usageLimits";
+import UpgradeModal from "@/components/UpgradeModal";
 
 const DAILY_LIMIT = 3;
 const SUPPORTED_FORMATS = "PNG, JPG, JPEG, WEBP";
@@ -83,6 +84,7 @@ export default function ImageUpload() {
 
     const [toast, setToast] = useState<{ message: string; type: ToastType } | null>(null);
     const [expandedItemId, setExpandedItemId] = useState<string | null>(null);
+    const [upgradeModal, setUpgradeModal] = useState<{ used: number; limit: number } | null>(null);
 
     // Mobile: show actions by toggling ⋯
     const [openActionsId, setOpenActionsId] = useState<string | null>(null);
@@ -326,14 +328,20 @@ export default function ImageUpload() {
                 itemId: id,
             });
 
+            const { data: { session: authSession } } = await supabase.auth.getSession();
+            const authHeaders: Record<string, string> = {
+                "x-image-width": String(width),
+                "x-image-height": String(height),
+                "x-file-bytes": String(file.size),
+                "x-file-name": file.name,
+            };
+            if (authSession?.access_token) {
+                authHeaders["Authorization"] = `Bearer ${authSession.access_token}`;
+            }
+
             const res = await fetch("/api/extract-text", {
                 method: "POST",
-                headers: {
-                    "x-image-width": String(width),
-                    "x-image-height": String(height),
-                    "x-file-bytes": String(file.size),
-                    "x-file-name": file.name,
-                },
+                headers: authHeaders,
                 body: form,
             });
 
@@ -356,6 +364,12 @@ export default function ImageUpload() {
             }
 
             console.groupEnd();
+
+            if (res.status === 429 && json?.upgradeRequired) {
+                updateItem(id, { status: "limit", error: "Daily limit reached." });
+                setUpgradeModal({ used: json.used ?? 3, limit: json.limit ?? 3 });
+                return;
+            }
 
             if (!res.ok || json.error) {
                 const msg = json?.error || "OCR failed. Try a clearer image.";
@@ -578,15 +592,11 @@ export default function ImageUpload() {
             <div className="rounded-2xl bg-white/40 border border-white/40 backdrop-blur-xl px-4 py-3 flex flex-col md:flex-row md:items-center md:justify-between gap-3">
                 <div>
                     <h2 className="text-sm font-semibold text-slate-900">Daily usage</h2>
-                    <p className="text-xs text-slate-600">{uploadsUsedToday === null ? "Signed in: unlimited usage enabled." : `Anonymous plan: ${DAILY_LIMIT} total tool runs per day.`}</p>
-                    <p className="text-xs text-slate-500 mt-1">
-                        Provider: <span className="font-medium">Auto (Vision ↔ Textract)</span>
-                    </p>
                 </div>
 
                 <div className="flex flex-col items-end gap-2">
                     <p className="text-xs text-slate-900 font-medium">
-                        {uploadsUsedToday === null ? "Unlimited" : `${uploadsUsedToday}/${DAILY_LIMIT} used today`}
+                        {uploadsUsedToday === null ? "Signed in" : `${uploadsUsedToday}/${DAILY_LIMIT} used today`}
                     </p>
 
                     {limitError && <p className="text-[11px] text-amber-700 text-right">{limitError}</p>}
@@ -847,6 +857,14 @@ export default function ImageUpload() {
                     </div>
                 </div>
             )}
+
+            {/* Upgrade modal */}
+            <UpgradeModal
+                open={upgradeModal !== null}
+                onClose={() => setUpgradeModal(null)}
+                used={upgradeModal?.used}
+                limit={upgradeModal?.limit}
+            />
 
             {/* Expand modal */}
             {expandedItem && (
