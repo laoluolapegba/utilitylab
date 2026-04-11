@@ -51,8 +51,8 @@ const PLAN_COLOR: Record<string, string> = {
 const TOOL_LABEL: Record<string, string> = {
     "image-to-text":             "Image to Text",
     "image-converter":           "Image Converter",
-    "invoice-analyze":           "Invoice Parser",
-    "product-listing-optimizer": "Product Optimiser",
+    "invoice-parser":            "Invoice Parser",
+    "generate-insights":         "Product Optimiser",
     "compliance-form":           "Compliance Forms",
     "repricing-alerts":          "Re-pricing Alerts",
 };
