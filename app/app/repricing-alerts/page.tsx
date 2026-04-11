@@ -1,10 +1,9 @@
-import MarketingNavbar from "@/components/landing/MarketingNavbar";
+import ProductPageLayout from "@/components/layouts/ProductPageLayout";
 import RepricingAlertsHero from "@/components/products/repricing-alerts/RepricingAlertsHero";
 import HowItWorks from "@/components/products/repricing-alerts/HowItWorks";
 import RepricingAlertsFeatures from "@/components/products/repricing-alerts/RepricingAlertsFeatures";
 import PricingSection from "@/components/products/repricing-alerts/PricingSection";
 import ProductFAQ from "@/components/products/repricing-alerts/ProductFAQ";
-import Footer from "@/components/landing/Footer";
 
 export const metadata = {
     title: "Re-Pricing Alerts — free competitor price monitoring for sellers | UtilityLab",
@@ -13,16 +12,12 @@ export const metadata = {
 
 export default function RepricingAlertsPage() {
     return (
-        <>
-            <MarketingNavbar />
-            <main className="min-h-screen bg-white text-slate-900">
-                <RepricingAlertsHero />
-                <HowItWorks />
-                <RepricingAlertsFeatures />
-                <PricingSection />
-                <ProductFAQ />
-                <Footer />
-            </main>
-        </>
+        <ProductPageLayout>
+            <RepricingAlertsHero />
+            <HowItWorks />
+            <RepricingAlertsFeatures />
+            <PricingSection />
+            <ProductFAQ />
+        </ProductPageLayout>
     );
 }
