@@ -6,5 +6,5 @@ export type OcrResult = {
 };
 
 export interface IOcrProvider {
-    extract(buffer: Buffer): Promise<OcrResult>;
+    extract(buffer: Buffer, correlationId?: string): Promise<OcrResult>;
 }

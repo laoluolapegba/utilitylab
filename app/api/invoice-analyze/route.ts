@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import OpenAI from "openai";
 import { createLogger, generateCorrelationId } from "@/lib/logger";
-import { extractIdentity, checkLimit, recordUsage } from "@/lib/usageTracking";
+import { extractIdentity, checkAndRecord } from "@/lib/usageTracking";
+import { InvoiceAnalyzeSchema } from "@/lib/apiSchemas";
 
 export const runtime = "nodejs";
 
@@ -199,14 +200,29 @@ export async function POST(req: NextRequest) {
     });
 
     const { userId, anonId } = await extractIdentity(req);
-    const { allowed, used, limit } = await checkLimit(userId, anonId);
+    const { allowed, used, limit } = await checkAndRecord("invoice-parser", userId, anonId);
     if (!allowed) {
         return NextResponse.json({ upgradeRequired: true, used, limit }, { status: 429 });
     }
-    await recordUsage("invoice-parser", userId, anonId);
+
+    // ── File-size gate (10 MB body limit) ────────────────────────────────────
+    const contentLength = Number(req.headers.get("content-length") ?? 0);
+    if (contentLength > 10_485_760) {
+        return NextResponse.json(
+            { error: "Request body exceeds the 10 MB limit.", code: "FILE_TOO_LARGE", correlationId },
+            { status: 413, headers: { "x-correlation-id": correlationId } },
+        );
+    }
 
     try {
-        const body = (await req.json()) as InvoiceBody;
+        const parsed = InvoiceAnalyzeSchema.safeParse(await req.json());
+        if (!parsed.success) {
+            return NextResponse.json(
+                { error: parsed.error.issues[0]?.message ?? "Invalid request", code: "VALIDATION_ERROR", correlationId },
+                { status: 400, headers: { "x-correlation-id": correlationId } },
+            );
+        }
+        const body = parsed.data as InvoiceBody;
         const rawText = body.rawText || "";
         const invoice = (body.invoice ?? {}) as Record<string, unknown>;
 

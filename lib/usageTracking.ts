@@ -1,15 +1,10 @@
 // lib/usageTracking.ts
 // Two-function usage accounting layer for all API routes.
 //
-//   extractIdentity(req)           — resolves userId (from JWT) or anonId (from header)
-//   checkLimit(userId?, anonId?)   — { allowed, used, limit } — does NOT record
-//   recordUsage(tool, userId?, anonId?) — inserts one row into usage_events
+//   extractIdentity(req)                     — resolves userId or anonId
+//   checkAndRecord(tool, userId?, anonId?)   — atomic check+insert via RPC
 //
-// Call order in every route handler:
-//   1. extractIdentity
-//   2. checkLimit  → return 429 if not allowed
-//   3. recordUsage
-//   4. actual processing
+// Legacy exports (checkLimit, recordUsage) kept for compatibility during migration.
 
 import { NextRequest } from "next/server";
 import { supabaseAdmin } from "./supabaseServer";
@@ -20,7 +15,7 @@ const PLAN_LIMIT: Record<string, number> = {
     anon:    3,
     free:    3,
     starter: 50,
-    pro:     Infinity,
+    pro:     2_147_483_647, // pg INTEGER max — treated as unlimited in the RPC
 };
 
 // ── Identity resolution ───────────────────────────────────────────────────────
@@ -42,17 +37,9 @@ export async function extractIdentity(
     return { anonId };
 }
 
-// ── Limit check ───────────────────────────────────────────────────────────────
+// ── Plan resolution ───────────────────────────────────────────────────────────
 
-/**
- * Returns the caller's current daily usage and whether they may proceed.
- * Does NOT write anything — call recordUsage separately.
- */
-export async function checkLimit(
-    userId?: string,
-    anonId?: string,
-): Promise<{ allowed: boolean; used: number; limit: number }> {
-    // ── Resolve plan ──────────────────────────────────────────────────────────
+async function resolvePlanLimit(userId?: string): Promise<number> {
     let planKey = userId ? "free" : "anon";
 
     if (userId) {
@@ -66,15 +53,81 @@ export async function checkLimit(
         if (plan === "starter" || plan === "pro") planKey = plan;
     }
 
-    const limit = PLAN_LIMIT[planKey] ?? PLAN_LIMIT.free;
+    return PLAN_LIMIT[planKey] ?? PLAN_LIMIT.free;
+}
 
-    // Pro users are never blocked — skip the DB read entirely
-    if (limit === Infinity) {
-        return { allowed: true, used: 0, limit: Infinity };
+// ── Atomic check-and-record (preferred) ──────────────────────────────────────
+
+/**
+ * Atomically checks the daily usage limit and records one event if allowed.
+ * Uses a Postgres advisory lock to prevent race conditions under concurrent requests.
+ * Returns { allowed, used, limit }.
+ */
+export async function checkAndRecord(
+    toolName: string,
+    userId?: string,
+    anonId?: string,
+): Promise<{ allowed: boolean; used: number; limit: number }> {
+    const limit = await resolvePlanLimit(userId);
+
+    const { data, error } = await supabaseAdmin.rpc("check_and_record_usage", {
+        p_user_id: userId  ?? null,
+        p_anon_id: anonId  ?? null,
+        p_tool:    toolName,
+        p_limit:   limit,
+    });
+
+    if (error || !data?.[0]) {
+        // RPC unavailable — fall back to non-atomic path so the request isn't blocked
+        process.stdout.write(
+            JSON.stringify({
+                level: "warn",
+                stage: "check_and_record",
+                message: "RPC check_and_record_usage failed, using fallback",
+                error: error?.message,
+                timestamp: new Date().toISOString(),
+            }) + "\n",
+        );
+        return fallbackCheckAndRecord(toolName, userId, anonId, limit);
     }
 
-    // ── Count today's events ──────────────────────────────────────────────────
-    const today = new Date().toISOString().slice(0, 10); // "YYYY-MM-DD"
+    const row = data[0] as { allowed: boolean; used_count: number };
+    return { allowed: row.allowed, used: row.used_count, limit };
+}
+
+// ── Fallback (non-atomic) ─────────────────────────────────────────────────────
+
+async function fallbackCheckAndRecord(
+    toolName: string,
+    userId?: string,
+    anonId?: string,
+    limit?: number,
+): Promise<{ allowed: boolean; used: number; limit: number }> {
+    const resolvedLimit = limit ?? await resolvePlanLimit(userId);
+    const { allowed, used } = await checkLimit(userId, anonId, resolvedLimit);
+    if (allowed) await recordUsage(toolName, userId, anonId);
+    return { allowed, used, limit: resolvedLimit };
+}
+
+// ── Legacy: separate check + record ──────────────────────────────────────────
+
+/**
+ * Returns the caller's current daily usage and whether they may proceed.
+ * Does NOT write anything — call recordUsage separately.
+ * @deprecated Prefer checkAndRecord for atomic behaviour.
+ */
+export async function checkLimit(
+    userId?: string,
+    anonId?: string,
+    limitOverride?: number,
+): Promise<{ allowed: boolean; used: number; limit: number }> {
+    const limit = limitOverride ?? await resolvePlanLimit(userId);
+
+    if (limit === PLAN_LIMIT.pro) {
+        return { allowed: true, used: 0, limit };
+    }
+
+    const today    = new Date().toISOString().slice(0, 10);
     const dayStart = `${today}T00:00:00.000Z`;
     const dayEnd   = `${today}T23:59:59.999Z`;
 
@@ -101,11 +154,9 @@ export async function checkLimit(
     return { allowed: used < limit, used, limit };
 }
 
-// ── Usage recording ───────────────────────────────────────────────────────────
-
 /**
- * Inserts one row into usage_events using the service-role client.
- * Fire-and-forget safe — awaited in routes so errors surface normally.
+ * Inserts one row into usage_events.
+ * @deprecated Prefer checkAndRecord for atomic behaviour.
  */
 export async function recordUsage(
     toolName: string,

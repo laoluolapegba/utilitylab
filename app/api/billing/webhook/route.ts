@@ -42,7 +42,22 @@ export async function POST(req: NextRequest) {
         );
     }
 
-    // ── 2. Handle checkout.session.completed ──────────────────────────────────
+    // ── 2. Idempotency — skip already-processed events ────────────────────────
+    const { data: existing } = await supabaseAdmin
+        .from("processed_webhooks")
+        .select("event_id")
+        .eq("event_id", event.id)
+        .maybeSingle();
+
+    if (existing) {
+        return NextResponse.json({ received: true });
+    }
+
+    await supabaseAdmin
+        .from("processed_webhooks")
+        .insert({ event_id: event.id });
+
+    // ── 3. Handle checkout.session.completed ──────────────────────────────────
     if (event.type === "checkout.session.completed") {
         const session = event.data.object as Stripe.Checkout.Session;
 

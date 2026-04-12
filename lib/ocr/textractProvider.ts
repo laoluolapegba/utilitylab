@@ -1,75 +1,61 @@
 // lib/ocr/textractProvider.ts
 
 import { IOcrProvider, OcrResult } from "./ocrProvider";
+import { createLogger, generateCorrelationId } from "@/lib/logger";
 
 export class TextractProvider implements IOcrProvider {
-    async extract(buffer: Buffer): Promise<OcrResult> {
-        const region = process.env.AWS_REGION;
-        const accessKeyId = process.env.AWS_ACCESS_KEY_ID;
+    async extract(buffer: Buffer, correlationId?: string): Promise<OcrResult> {
+        const log   = createLogger(correlationId ?? generateCorrelationId());
+        const start = Date.now();
+
+        const region          = process.env.AWS_REGION;
+        const accessKeyId     = process.env.AWS_ACCESS_KEY_ID;
         const secretAccessKey = process.env.AWS_SECRET_ACCESS_KEY;
 
-        console.log("[Textract] Starting extraction", {
+        log("textract_start").info("Starting Textract extraction", {
+            durationMs: 0,
             bufferBytes: buffer.length,
             hasRegion: !!region,
-            hasAccessKeyId: !!accessKeyId,
-            hasSecretAccessKey: !!secretAccessKey,
+            hasCredentials: !!(accessKeyId && secretAccessKey),
         });
 
         if (!region || !accessKeyId || !secretAccessKey) {
-            throw new Error("Textract configuration missing: AWS_REGION / AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY");
+            throw new Error(
+                "Textract configuration missing: AWS_REGION / AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY",
+            );
         }
 
-        const {
-            TextractClient,
-            AnalyzeDocumentCommand,
-        } = await import("@aws-sdk/client-textract");
-
-        console.log("[Textract] AWS SDK loaded");
+        const { TextractClient, AnalyzeDocumentCommand } = await import("@aws-sdk/client-textract");
 
         const client = new TextractClient({
             region,
-            credentials: {
-                accessKeyId,
-                secretAccessKey,
-            },
+            credentials: { accessKeyId, secretAccessKey },
         });
-
-        console.log("[Textract] Client created");
 
         const command = new AnalyzeDocumentCommand({
             Document: { Bytes: buffer },
             FeatureTypes: ["TABLES", "FORMS"],
         });
 
-        console.log("[Textract] Sending AnalyzeDocument request");
-
         const response = await client.send(command);
 
-        console.log("[Textract] Response received", {
-            blockCount: response.Blocks?.length ?? 0,
-        });
-
-        const blocks = response.Blocks || [];
+        const blocks     = response.Blocks || [];
         const lineBlocks = blocks.filter((b) => b.BlockType === "LINE");
-        const text = lineBlocks.map((l) => l.Text).filter(Boolean).join("\n");
+        const text       = lineBlocks.map((l) => l.Text).filter(Boolean).join("\n");
 
-        let confidence: number | null = null;
+        const confidence =
+            lineBlocks.length > 0
+                ? lineBlocks.reduce((sum, b) => sum + (b.Confidence ?? 0), 0) / lineBlocks.length
+                : null;
 
-        if (lineBlocks.length > 0) {
-            confidence =
-                lineBlocks.reduce((sum, b) => sum + (b.Confidence ?? 0), 0) /
-                lineBlocks.length;
-        }
-
-        console.log("[Textract] Extraction complete", {
+        log("textract_complete").info("Textract extraction complete", {
+            durationMs: Date.now() - start,
+            blockCount: blocks.length,
             lineCount: lineBlocks.length,
             textLength: text.length,
             confidence,
         });
 
-        return {
-            rawText: text || "",
-            confidence,
-        };
+        return { rawText: text || "", confidence };
     }
 }

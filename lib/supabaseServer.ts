@@ -2,6 +2,7 @@
 // Server-only Supabase client using the service role key.
 // Never import this in client components — it bypasses RLS.
 
+import "@/lib/config"; // validates required env vars at cold start
 import { createClient } from "@supabase/supabase-js";
 
 export const supabaseAdmin = createClient(

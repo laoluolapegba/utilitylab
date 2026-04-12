@@ -1,19 +1,24 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseServer";
+import { IdeasSchema } from "@/lib/apiSchemas";
 
 export const runtime = "nodejs";
 
 export async function POST(req: NextRequest) {
-    let tool: string, description: string, email: string | null;
+    let tool: string, description: string, email: string | null | undefined;
 
     try {
-        ({ tool, description, email = null } = await req.json());
+        const raw = await req.json();
+        const parsed = IdeasSchema.safeParse(raw);
+        if (!parsed.success) {
+            return NextResponse.json(
+                { error: parsed.error.issues[0]?.message ?? "Invalid request", code: "VALIDATION_ERROR" },
+                { status: 400 },
+            );
+        }
+        ({ tool, description, email } = parsed.data);
     } catch {
         return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
-    }
-
-    if (!tool || !description?.trim()) {
-        return NextResponse.json({ error: "tool and description are required" }, { status: 400 });
     }
 
     const { error } = await supabaseAdmin.from("ideas").insert({

@@ -10,6 +10,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import Stripe from "stripe";
 import { supabaseAdmin } from "@/lib/supabaseServer";
+import { CheckoutSchema } from "@/lib/apiSchemas";
 
 export const runtime = "nodejs";
 
@@ -26,13 +27,17 @@ export async function POST(req: NextRequest) {
     let userId: string;
 
     try {
-        ({ priceId, userId } = await req.json());
+        const raw = await req.json();
+        const parsed = CheckoutSchema.safeParse(raw);
+        if (!parsed.success) {
+            return NextResponse.json(
+                { error: parsed.error.issues[0]?.message ?? "Invalid request", code: "VALIDATION_ERROR" },
+                { status: 400 },
+            );
+        }
+        ({ priceId, userId } = parsed.data);
     } catch {
         return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
-    }
-
-    if (!priceId || !userId) {
-        return NextResponse.json({ error: "priceId and userId are required" }, { status: 400 });
     }
 
     // Guard against arbitrary price IDs being passed in

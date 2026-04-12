@@ -1,0 +1,11 @@
+// app/api/health/route.ts
+// Lightweight uptime check — no auth, no DB.
+// Used by Vercel, uptime monitors, and load balancers.
+
+import { NextResponse } from "next/server";
+
+export const runtime = "nodejs";
+
+export function GET() {
+    return NextResponse.json({ status: "ok", timestamp: new Date().toISOString() });
+}

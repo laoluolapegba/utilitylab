@@ -2,11 +2,11 @@
 
 import { IOcrProvider, OcrResult } from "./ocrProvider";
 import { ImageAnnotatorClient } from "@google-cloud/vision";
+import { createLogger, generateCorrelationId } from "@/lib/logger";
 
 function getPrivateKey() {
     const key = process.env.GCP_PRIVATE_KEY;
     if (!key) return undefined;
-    // handle \n in env var
     return key.replace(/\\n/g, "\n");
 }
 
@@ -14,14 +14,18 @@ export class GoogleVisionProvider implements IOcrProvider {
     private client: ImageAnnotatorClient;
 
     constructor() {
-        const projectId = process.env.GCP_PROJECT_ID;
+        const projectId   = process.env.GCP_PROJECT_ID;
         const clientEmail = process.env.GCP_CLIENT_EMAIL;
-        const privateKey = getPrivateKey();
+        const privateKey  = getPrivateKey();
 
         if (!projectId || !clientEmail || !privateKey) {
-            console.warn(
-                "[GoogleVisionProvider] Missing GCP credentials env vars. " +
-                "Make sure GCP_PROJECT_ID, GCP_CLIENT_EMAIL, GCP_PRIVATE_KEY are set."
+            process.stdout.write(
+                JSON.stringify({
+                    level: "warn",
+                    stage: "google_vision_init",
+                    message: "Missing GCP credentials — GCP_PROJECT_ID, GCP_CLIENT_EMAIL, GCP_PRIVATE_KEY",
+                    timestamp: new Date().toISOString(),
+                }) + "\n",
             );
         }
 
@@ -34,25 +38,33 @@ export class GoogleVisionProvider implements IOcrProvider {
         });
     }
 
-    async extract(buffer: Buffer): Promise<OcrResult> {
+    async extract(buffer: Buffer, correlationId?: string): Promise<OcrResult> {
+        const log   = createLogger(correlationId ?? generateCorrelationId());
+        const start = Date.now();
+
+        log("google_vision_start").info("Calling Google Vision textDetection", {
+            durationMs: 0,
+            bufferBytes: buffer.length,
+        });
+
         const [result] = await this.client.textDetection(buffer);
 
-        const text = result.fullTextAnnotation?.text || "";
-
-        const pages = result.fullTextAnnotation?.pages || [];
-        const blocks = pages.flatMap((p) => p.blocks || []);
-        const confidences = blocks
+        const text    = result.fullTextAnnotation?.text || "";
+        const pages   = result.fullTextAnnotation?.pages || [];
+        const blocks  = pages.flatMap((p) => p.blocks || []);
+        const confs   = blocks
             .map((b) => b.confidence)
             .filter((c): c is number => typeof c === "number");
 
         const confidence =
-            confidences.length > 0
-                ? confidences.reduce((a, b) => a + b, 0) / confidences.length
-                : null;
+            confs.length > 0 ? confs.reduce((a, b) => a + b, 0) / confs.length : null;
 
-        return {
-            rawText: text,
+        log("google_vision_complete").info("Google Vision returned result", {
+            durationMs: Date.now() - start,
+            textLength: text.length,
             confidence,
-        };
+        });
+
+        return { rawText: text, confidence };
     }
 }
