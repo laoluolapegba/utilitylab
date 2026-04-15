@@ -292,7 +292,7 @@ Set in Vercel dashboard under Settings → Environment Variables
 
 ## 🎯 Current Status
 
-**✅ All Products Complete:**
+**✅ All Products:**
 1. Image to Text - OCR extraction
 2. PDF to Accounting (Invoice Parser) - Invoice data extraction
 3. Image Converter - Format conversion
@@ -337,24 +337,6 @@ Edit `lib/usageLimits.ts` or component-level constants
 ### Update Privacy Policy
 Edit privacy section in product pages and homepage
 
----
-
-## 🐛 Troubleshooting
-
-### Issue: Product not showing on homepage
-**Solution:** Add to ProductsGrid.tsx with correct status
-
-### Issue: Tool not loading
-**Solution:** Check component import path and #tool section exists
-
-### Issue: Auth not detecting login
-**Solution:** Verify Supabase client initialized, check browser console
-
-### Issue: Scroll to tool not working
-**Solution:** Ensure section has `id="tool"` attribute
-
-### Issue: API endpoint failing
-**Solution:** Check route.ts file, verify environment variables
 
 ---
  In all interactions and commit messages, be extremely concise and sacrifice grammar for the sake of brevity
@@ -371,7 +353,7 @@ when i say add a comment to a PR with a TODO on it, use 'checkbox' markdown form
 
 ##changesets
 Tod add a changeset , write a new file to the `.changeset` directory
-the file should be named `0000-your-change,md`. decide yourself whether to make it a patch ,minor, or major change
+the file should be named `0000-your-change.md`. decide yourself whether to make it a patch ,minor, or major change
 the format of the file should be : 
 ```md
 ---
@@ -390,7 +372,7 @@ the description of the change should be user-facing , describe what features wer
 
 ## Plans
 - at the end of each plan, give me a list of unresolved questions to answer, if any. Make the questions extremely concise. sacrifice grammar for the sake of concision.
-make plans multiphase
+make plans multi-phase
  
  
 **Last Updated:** 2024  
