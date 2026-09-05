@@ -3,7 +3,7 @@
 import { supabase } from "@/lib/supabaseClient";
 
 const ANON_USAGE_KEY = "utilitylab:anon-usage:v1";
-const DAILY_LIMIT = 3;
+const DAILY_LIMIT = 30;
 
 type UsageSnapshot = {
     date: string;

@@ -2,7 +2,7 @@ import { Check, ArrowRight } from "lucide-react";
 import Link from "next/link";
 
 const included = [
-    "3 free form generations per day — no card required",
+    "30 free form generations per day — no card required",
     "HMRC and Companies House compliant templates",
     "AI-guided plain-English form completion",
     "Auto-fill from your saved business details",

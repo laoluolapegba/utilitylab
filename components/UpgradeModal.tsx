@@ -34,8 +34,8 @@ export interface UpgradeModalProps {
 export default function UpgradeModal({
     open,
     onClose,
-    used  = 3,
-    limit = 3,
+    used  = 30,
+    limit = 30,
 }: UpgradeModalProps) {
     const [portalRoot, setPortalRoot] = useState<Element | null>(null);
     const [loading,    setLoading]    = useState(false);

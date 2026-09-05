@@ -25,8 +25,8 @@ describe("usageLimits — anonymous user", () => {
         const state = await getUsageLimitState();
         expect(state.isAuthenticated).toBe(false);
         expect(state.usedToday).toBe(0);
-        expect(state.limit).toBe(3);
-        expect(state.remaining).toBe(3);
+        expect(state.limit).toBe(30);
+        expect(state.remaining).toBe(30);
         expect(state.limitReached).toBe(false);
         expect(state.loading).toBe(false);
     });
@@ -46,20 +46,18 @@ describe("usageLimits — anonymous user", () => {
         expect((await getUsageLimitState()).usedToday).toBe(2);
     });
 
-    it("sets limitReached after 3 uses", async () => {
-        await recordAnonymousUsage();
-        await recordAnonymousUsage();
-        await recordAnonymousUsage();
+    it("sets limitReached after 30 uses", async () => {
+        for (let i = 0; i < 30; i++) await recordAnonymousUsage();
         const state = await getUsageLimitState();
-        expect(state.usedToday).toBe(3);
+        expect(state.usedToday).toBe(30);
         expect(state.remaining).toBe(0);
         expect(state.limitReached).toBe(true);
     });
 
     it("does not exceed the cap on extra calls", async () => {
-        for (let i = 0; i < 6; i++) await recordAnonymousUsage();
+        for (let i = 0; i < 32; i++) await recordAnonymousUsage();
         const state = await getUsageLimitState();
-        expect(state.usedToday).toBe(3);
+        expect(state.usedToday).toBe(30);
     });
 
     it("resets count when the stored date is yesterday", async () => {
@@ -67,7 +65,7 @@ describe("usageLimits — anonymous user", () => {
         yesterday.setDate(yesterday.getDate() - 1);
         localStorage.setItem(
             STORAGE_KEY,
-            JSON.stringify({ date: yesterday.toISOString().slice(0, 10), count: 3 }),
+            JSON.stringify({ date: yesterday.toISOString().slice(0, 10), count: 30 }),
         );
         const state = await getUsageLimitState();
         expect(state.usedToday).toBe(0);

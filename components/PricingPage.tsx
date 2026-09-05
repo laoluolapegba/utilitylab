@@ -75,7 +75,7 @@ const COMPARISON = [
     {
         category: "Usage",
         rows: [
-            { label: "Daily uses",            free: "3 / day",   starter: "50 / day",   pro: "Unlimited" },
+            { label: "Daily uses",            free: "30 / day",   starter: "50 / day",   pro: "Unlimited" },
             { label: "All 6 tools",            free: true,        starter: true,          pro: true },
             { label: "All file formats",       free: true,        starter: true,          pro: true },
         ],
@@ -400,7 +400,7 @@ export default function PricingPage() {
                     Ready to get more done?
                 </h2>
                 <p className="text-indigo-200 mb-8 max-w-md mx-auto text-base">
-                    Start with 3 free uses a day — no card, no commitment.
+                    Start with 30 free uses a day — no card, no commitment.
                 </p>
                 <a
                     href="/auth?mode=signup"

@@ -11,6 +11,9 @@ export const metadata: Metadata = {
     },
 };
 
+/**
+ * Defines the shared HTML shell for every Utility Lab route.
+ */
 export default function RootLayout({
     children,
 }: Readonly<{
@@ -18,7 +21,7 @@ export default function RootLayout({
 }>) {
     return (
         <html lang="en" suppressHydrationWarning className={inter.className}>
-            <body className="antialiased text-slate-900 bg-white">
+            <body suppressHydrationWarning className="antialiased text-slate-900 bg-white">
                 {/*
                   Faux-viewport shell. All content scrolls inside #scroll-area.
                   #modal-root is a sibling — modals use position:absolute within

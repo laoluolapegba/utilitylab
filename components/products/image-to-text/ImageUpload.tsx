@@ -7,7 +7,7 @@ import UsageLimitGate from "@/components/UsageLimitGate";
 import { getUsageLimitState, recordAnonymousUsage } from "@/lib/usageLimits";
 import UpgradeModal from "@/components/UpgradeModal";
 
-const DAILY_LIMIT = 3;
+const DAILY_LIMIT = 30;
 const SUPPORTED_FORMATS = "PNG, JPG, JPEG, WEBP";
 
 function generateCorrelationId(): string {
@@ -376,7 +376,7 @@ export default function ImageUpload() {
 
             if (res.status === 429 && json?.upgradeRequired) {
                 updateItem(id, { status: "limit", error: "Daily limit reached.", errorCorrelationId: correlationId });
-                setUpgradeModal({ used: json.used ?? 3, limit: json.limit ?? 3 });
+                setUpgradeModal({ used: json.used ?? DAILY_LIMIT, limit: json.limit ?? DAILY_LIMIT });
                 return;
             }
 

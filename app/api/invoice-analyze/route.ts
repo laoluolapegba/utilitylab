@@ -3,6 +3,7 @@ import OpenAI from "openai";
 import { createLogger, generateCorrelationId } from "@/lib/logger";
 import { extractIdentity, checkAndRecord } from "@/lib/usageTracking";
 import { InvoiceAnalyzeSchema } from "@/lib/apiSchemas";
+import type { InvoiceExtraction } from "@/lib/invoice/schema";
 
 export const runtime = "nodejs";
 
@@ -31,102 +32,121 @@ type InvoiceBody = {
 
 // ─── Fallback ────────────────────────────────────────────────────────────────
 
-const fallbackAnalysis = {
-    deductibleStatus: "partial",
-    reason: "Review line items to confirm business purpose. Mixed-use invoices can be partly deductible.",
-    vatReclaimableAmount: "Check VAT line on invoice",
-    category: "General Business Expense",
-    ukAccountingCode: "400",
-    warnings: ["Always keep a valid VAT invoice for HMRC records."],
-    summary: "The invoice appears to be a business expense. Confirm private use and VAT eligibility before filing.",
+const fallbackExtraction: InvoiceExtraction = {
+    supplier_name: "",
+    supplier_vat_number: null,
+    invoice_number: "",
+    invoice_date: "",
+    due_date: null,
+    currency: "GBP",
+    subtotal: 0,
+    vat_amount: 0,
+    vat_rate: null,
+    total_amount: 0,
+    line_items: [],
+    extraction_confidence: {
+        overall: "low",
+        per_field: {},
+    },
+    raw_ocr_text: "",
 };
 
-// ─── Analysis ────────────────────────────────────────────────────────────────
+// ─── Extraction ───────────────────────────────────────────────────────────────
 
-async function generateStructuredAnalysis(
+async function extractInvoice(
     rawText: string,
-    invoice: Record<string, unknown>,
     log: ReturnType<typeof createLogger>,
     requestStart: number,
-) {
+): Promise<InvoiceExtraction> {
     if (!process.env.OPENAI_API_KEY) {
-        log("analysis_skipped").warn("No OPENAI_API_KEY — returning fallback analysis", {
+        log("extraction_skipped").warn("No OPENAI_API_KEY — returning fallback extraction", {
             durationMs: Date.now() - requestStart,
         });
-        return fallbackAnalysis;
+        return { ...fallbackExtraction, raw_ocr_text: rawText };
     }
 
-    log("analysis_start").info("Calling OpenAI for structured analysis", {
+    log("extraction_start").info("Calling OpenAI for invoice extraction", {
         durationMs: Date.now() - requestStart,
         rawTextLength: rawText.length,
-        invoiceFieldCount: Object.keys(invoice).length,
     });
 
     const callStart = Date.now();
 
+    const schemaDescription = `{
+  "supplier_name": string,
+  "supplier_vat_number": string | null,
+  "invoice_number": string,
+  "invoice_date": string,          // ISO 8601
+  "due_date": string | null,
+  "currency": string,              // default "GBP"
+  "subtotal": number,
+  "vat_amount": number,
+  "vat_rate": number | null,       // 0, 5, or 20
+  "total_amount": number,
+  "line_items": [
+    {
+      "description": string,
+      "quantity": number | null,
+      "unit_price": number | null,
+      "vat_rate": number | null,
+      "line_total": number
+    }
+  ],
+  "extraction_confidence": {
+    "overall": "high" | "medium" | "low",
+    "per_field": { [fieldName]: "high" | "medium" | "low" | "missing" }
+  },
+  "raw_ocr_text": string
+}`;
+
     try {
-        const prompt = `You are a UK bookkeeping assistant for freelancers and contractors.
-Given OCR text and extracted fields, return ONLY valid JSON:
-{
-  "deductibleStatus": "fully" | "partial",
-  "reason": "plain english reason",
-  "vatReclaimableAmount": "amount or guidance",
-  "category": "expense category",
-  "ukAccountingCode": "simple nominal/account code",
-  "warnings": ["warning"],
-  "summary": "2-3 sentence summary"
-}
-Consider UK VAT, sole trader rules, CIS context when relevant.
-
-OCR text:\n${rawText.slice(0, 12000)}
-
-Extracted fields:\n${JSON.stringify(invoice, null, 2)}
-`;
-
         const completion = await client.chat.completions.create({
-            model: "gpt-4o-mini",
-            temperature: 0.2,
+            model: "gpt-4o",
+            temperature: 0,
             messages: [
-                { role: "system", content: "Respond with JSON only." },
-                { role: "user", content: prompt },
+                {
+                    role: "system",
+                    content:
+                        "You are a UK invoice data extractor. " +
+                        "Return ONLY valid JSON matching the schema exactly. " +
+                        "For every field you are uncertain about, set its per_field confidence to 'low'. " +
+                        "Missing fields are null, never invented. " +
+                        "UK VAT numbers start with GB followed by 9 digits.",
+                },
+                {
+                    role: "user",
+                    content: `Extract all invoice fields from the OCR text below into this JSON schema:\n${schemaDescription}\n\nOCR text:\n${rawText.slice(0, 12000)}`,
+                },
             ],
         });
 
         const content = completion.choices[0]?.message?.content ?? "{}";
 
-        log("analysis_openai_ok").info("OpenAI responded", {
+        log("extraction_openai_ok").info("OpenAI extraction responded", {
             durationMs: Date.now() - callStart,
             finishReason: completion.choices[0]?.finish_reason,
             contentLength: content.length,
         });
 
         try {
-            const parsed = JSON.parse(content);
-            return {
-                deductibleStatus: parsed.deductibleStatus === "fully" ? "fully" : "partial",
-                reason: String(parsed.reason || fallbackAnalysis.reason),
-                vatReclaimableAmount: String(parsed.vatReclaimableAmount || fallbackAnalysis.vatReclaimableAmount),
-                category: String(parsed.category || fallbackAnalysis.category),
-                ukAccountingCode: String(parsed.ukAccountingCode || fallbackAnalysis.ukAccountingCode),
-                warnings: Array.isArray(parsed.warnings)
-                    ? parsed.warnings.map((w: unknown) => String(w))
-                    : fallbackAnalysis.warnings,
-                summary: String(parsed.summary || fallbackAnalysis.summary),
-            };
+            const parsed: InvoiceExtraction = JSON.parse(content);
+            // Always attach the full raw text regardless of what the model returned
+            parsed.raw_ocr_text = rawText;
+            return parsed;
         } catch (parseError) {
-            log("analysis_parse_fail").error("Failed to parse OpenAI JSON response", {
+            log("extraction_parse_fail").error("Failed to parse OpenAI JSON response", {
                 durationMs: Date.now() - callStart,
                 error: parseError instanceof Error ? parseError : new Error(String(parseError)),
                 rawContent: content.slice(0, 500),
             });
-            return fallbackAnalysis;
+            return { ...fallbackExtraction, raw_ocr_text: rawText };
         }
     } catch (openaiError) {
-        log("analysis_openai_fail").error("OpenAI API call failed", {
+        log("extraction_openai_fail").error("OpenAI extraction call failed", {
             durationMs: Date.now() - callStart,
             error: openaiError instanceof Error ? openaiError : new Error(String(openaiError)),
         });
-        return fallbackAnalysis;
+        return { ...fallbackExtraction, raw_ocr_text: rawText };
     }
 }
 
@@ -224,7 +244,7 @@ export async function POST(req: NextRequest) {
         }
         const body = parsed.data as InvoiceBody;
         const rawText = body.rawText || "";
-        const invoice = (body.invoice ?? {}) as Record<string, unknown>;
+        const invoice = (body.invoice ?? {}) as Record<string, unknown>; // used by Q&A only
 
         log("request_parsed").info("Request body parsed", {
             durationMs: Date.now() - requestStart,
@@ -255,14 +275,14 @@ export async function POST(req: NextRequest) {
             });
         }
 
-        const analysis = await generateStructuredAnalysis(rawText, invoice, log, requestStart);
+        const extraction = await extractInvoice(rawText, log, requestStart);
 
-        log("request_complete").info("Analysis response sent", {
+        log("request_complete").info("Extraction response sent", {
             durationMs: Date.now() - requestStart,
-            deductibleStatus: analysis.deductibleStatus,
+            confidence: extraction.extraction_confidence.overall,
         });
 
-        return NextResponse.json({ analysis }, {
+        return NextResponse.json({ extraction }, {
             headers: { "x-correlation-id": correlationId },
         });
 

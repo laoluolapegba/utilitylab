@@ -74,7 +74,7 @@ export default function ImageToTextHero() {
                         <div className="mt-8 flex items-center gap-6 text-sm text-slate-500">
                             <div className="flex items-center gap-2">
                                 <div className="w-2 h-2 rounded-full bg-green-500" />
-                                <span>3 free daily</span>
+                                <span>30 free daily</span>
                             </div>
                             <div className="flex items-center gap-2">
                                 <div className="w-2 h-2 rounded-full bg-green-500" />

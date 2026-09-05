@@ -23,7 +23,7 @@ export default function ImageToTextPage() {
                             Try It Now
                         </h2>
                         <p className="text-lg text-slate-600 leading-relaxed max-w-2xl mx-auto">
-                            Upload your images below and see instant results. Get 3 free conversions daily.
+                            Upload your images below and see instant results. Get 30 free conversions daily.
                         </p>
                     </div>
                     <div className="max-w-5xl mx-auto">

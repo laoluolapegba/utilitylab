@@ -87,7 +87,7 @@ export default function ToolIntegration() {
                             <p className="text-slate-600 mb-8 max-w-2xl mx-auto">
                                 {isAuthenticated
                                     ? "Access the full Image to Text converter with all features unlocked."
-                                    : "Sign up for free to access the Image to Text converter. Get 3 free conversions daily with no credit card required."
+                                    : "Sign up for free to access the Image to Text converter. Get 30 free conversions daily with no credit card required."
                                 }
                             </p>
 
@@ -125,7 +125,7 @@ export default function ToolIntegration() {
                                     </div>
                                     <div className="flex items-center gap-2">
                                         <div className="w-2 h-2 rounded-full bg-green-500" />
-                                        <span>3 free daily</span>
+                                        <span>30 free daily</span>
                                     </div>
                                     <div className="flex items-center gap-2">
                                         <div className="w-2 h-2 rounded-full bg-green-500" />

@@ -2,7 +2,7 @@ import { Check, ArrowRight } from "lucide-react";
 import Link from "next/link";
 
 const included = [
-    "3 free conversions per day — no card required",
+    "30 free conversions per day — no card required",
     "All image formats: PNG, JPG, JPEG, WEBP",
     "Multi-language OCR with 99% accuracy",
     "Copy to clipboard and TXT / JSON export",

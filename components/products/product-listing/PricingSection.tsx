@@ -2,7 +2,7 @@ import { Check, ArrowRight } from "lucide-react";
 import Link from "next/link";
 
 const included = [
-    "3 free listing generations per day — no card required",
+    "30 free listing generations per day — no card required",
     "All 7 platforms: Amazon, eBay, Shopify, Etsy, WooCommerce, Facebook, CSV",
     "SEO-optimised copy with platform-specific formatting",
     "Tone and target audience customisation",

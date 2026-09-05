@@ -74,8 +74,8 @@ export default function ProductListingOptimizerTool() {
         loading: true,
         isAuthenticated: false,
         usedToday: 0,
-        limit: 3,
-        remaining: 3,
+        limit: 30,
+        remaining: 30,
         limitReached: false,
     });
 

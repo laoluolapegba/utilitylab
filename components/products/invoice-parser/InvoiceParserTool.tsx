@@ -4,39 +4,15 @@ import { useEffect, useMemo, useState } from "react";
 
 import UsageLimitGate from "@/components/UsageLimitGate";
 import { getUsageLimitState, recordAnonymousUsage, type UsageLimitState } from "@/lib/usageLimits";
+import type { InvoiceExtraction } from "@/lib/invoice/schema";
+import { classifyVAT, type VATClassification } from "@/lib/invoice/vatRules";
+import { categoriseExpense, type ExpenseCategory } from "@/lib/invoice/expenseRules";
+
+// ── pure helpers ──────────────────────────────────────────────────────────────
 
 function generateCorrelationId(): string {
     return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
 }
-
-type LineItem = {
-    description: string;
-    amount: string;
-};
-
-type InvoiceDraft = {
-    vendorName: string;
-    invoiceNumber: string;
-    invoiceDate: string;
-    totalAmount: string;
-    vatAmount: string;
-    lineItems: LineItem[];
-};
-
-type AnalysisResult = {
-    deductibleStatus: "fully" | "partial";
-    reason: string;
-    vatReclaimableAmount: string;
-    category: string;
-    ukAccountingCode: string;
-    warnings: string[];
-    summary: string;
-};
-
-type ChatMessage = { role: "user" | "assistant"; content: string };
-type OutputFormat = "journal" | "xero" | "csv" | "summary";
-
-const MAX_MB = 10;
 
 function parseAmount(value: string): number {
     const cleaned = value.replace(/[^\d.-]/g, "");
@@ -44,33 +20,58 @@ function parseAmount(value: string): number {
     return Number.isNaN(amount) ? 0 : amount;
 }
 
-function buildFallbackDraft(rawText: string): InvoiceDraft {
+function buildFallbackDraft(rawText: string): InvoiceExtraction {
     const lines = rawText.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
     const firstLine = lines[0] || "Unknown Vendor";
 
     const invoiceNumber = rawText.match(/(?:invoice\s*(?:number|no\.?|#)\s*[:\-]?\s*)([A-Z0-9\-\/]+)/i)?.[1] ?? "";
     const invoiceDate = rawText.match(/(?:date\s*[:\-]?\s*)(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4}|\d{4}[\-]\d{2}[\-]\d{2})/i)?.[1] ?? "";
-    const totalAmount = rawText.match(/(?:total\s*(?:due|amount)?\s*[:\-]?\s*)(£?\s?\d+[\d,.]*)/i)?.[1] ?? "";
-    const vatAmount = rawText.match(/(?:vat\s*(?:amount)?\s*[:\-]?\s*)(£?\s?\d+[\d,.]*)/i)?.[1] ?? "";
+    const totalStr = rawText.match(/(?:total\s*(?:due|amount)?\s*[:\-]?\s*)(£?\s?\d+[\d,.]*)/i)?.[1] ?? "";
+    const vatStr = rawText.match(/(?:vat\s*(?:amount)?\s*[:\-]?\s*)(£?\s?\d+[\d,.]*)/i)?.[1] ?? "";
 
-    const lineItems = lines
+    const total_amount = parseAmount(totalStr);
+    const vat_amount = parseAmount(vatStr);
+    const subtotal = Math.max(total_amount - vat_amount, 0);
+
+    const line_items = lines
         .filter((line) => /£?\s?\d+[\d,.]*$/.test(line))
         .slice(0, 8)
         .map((line) => {
             const amountMatch = line.match(/(£?\s?\d+[\d,.]*)$/);
             return {
                 description: line.replace(/(£?\s?\d+[\d,.]*)$/, "").trim() || "Item",
-                amount: amountMatch?.[1] ?? "",
+                quantity: null,
+                unit_price: null,
+                vat_rate: null,
+                line_total: parseAmount(amountMatch?.[1] ?? "0"),
             };
         });
 
     return {
-        vendorName: firstLine,
-        invoiceNumber,
-        invoiceDate,
-        totalAmount,
-        vatAmount,
-        lineItems: lineItems.length ? lineItems : [{ description: "General expense", amount: totalAmount || "" }],
+        supplier_name: firstLine,
+        supplier_vat_number: null,
+        invoice_number: invoiceNumber,
+        invoice_date: invoiceDate,
+        due_date: null,
+        currency: "GBP",
+        subtotal,
+        vat_amount,
+        vat_rate: null,
+        total_amount,
+        line_items: line_items.length
+            ? line_items
+            : [{ description: "General expense", quantity: null, unit_price: null, vat_rate: null, line_total: total_amount }],
+        extraction_confidence: {
+            overall: "low",
+            per_field: {
+                supplier_name: "low",
+                invoice_number: invoiceNumber ? "medium" : "missing",
+                invoice_date: invoiceDate ? "medium" : "missing",
+                total_amount: totalStr ? "medium" : "missing",
+                vat_amount: vatStr ? "medium" : "missing",
+            },
+        },
+        raw_ocr_text: rawText,
     };
 }
 
@@ -93,33 +94,85 @@ function downloadText(content: string, filename: string, mime = "text/plain;char
     URL.revokeObjectURL(url);
 }
 
+// ── VAT badge helpers ─────────────────────────────────────────────────────────
+
+const VAT_LABEL: Record<string, string> = {
+    standard: "Standard VAT",
+    zero_rated: "Zero-rated",
+    reverse_charge: "Reverse Charge",
+    exempt: "Exempt",
+    outside_scope: "Outside Scope",
+    unknown: "VAT Unknown",
+};
+
+function vatBadgeVariant(vat: VATClassification): "green" | "amber" | "red" {
+    if (vat.treatment === "unknown" || vat.treatment === "outside_scope" || vat.confidence === "low") return "red";
+    if (vat.treatment === "zero_rated" || vat.treatment === "reverse_charge" || vat.treatment === "exempt" || vat.confidence === "medium") return "amber";
+    return "green";
+}
+
+const BADGE_CLASSES = {
+    green: "bg-emerald-50 text-emerald-700 border-emerald-200",
+    amber: "bg-amber-50 text-amber-700 border-amber-200",
+    red: "bg-red-50 text-red-700 border-red-200",
+};
+
+const BADGE_ICON = { green: "✓", amber: "⚠", red: "✗" };
+
+// ── sub-components ────────────────────────────────────────────────────────────
+
+function ConfidenceDot({ level }: { level: "high" | "medium" | "low" | "missing" | undefined }) {
+    if (!level || level === "missing" || level === "low") {
+        return <span className="inline-block w-2 h-2 rounded-full bg-red-400 shrink-0" title={level ?? "unknown"} />;
+    }
+    if (level === "medium") {
+        return <span className="inline-block w-2 h-2 rounded-full bg-amber-400 shrink-0" title="medium confidence" />;
+    }
+    return <span className="inline-block w-2 h-2 rounded-full bg-emerald-400 shrink-0" title="high confidence" />;
+}
+
+// ── summary builder ───────────────────────────────────────────────────────────
+
+function buildSummary(
+    extraction: InvoiceExtraction,
+    vat: VATClassification,
+    expense: ExpenseCategory,
+): string {
+    const supplier = extraction.supplier_name || "Unknown supplier";
+    const total = `${extraction.currency} ${extraction.total_amount.toFixed(2)}`;
+    const date = extraction.invoice_date ? ` dated ${extraction.invoice_date}` : "";
+    const cat = expense.matched ? expense.category : "general expense";
+    return (
+        `Invoice from ${supplier} for ${total}${date}, categorised as ${cat}. ` +
+        vat.reasoning
+    );
+}
+
+// ── output types ──────────────────────────────────────────────────────────────
+
+type OutputFormat = "journal" | "xero" | "csv" | "summary";
+
+// ── component ─────────────────────────────────────────────────────────────────
+
 export default function InvoiceParserTool() {
-    const [step, setStep] = useState<1 | 2 | 3 | 4>(1);
+    const [step, setStep] = useState<1 | 2 | 3>(1);
     const [selectedFile, setSelectedFile] = useState<File | null>(null);
-    const [rawText, setRawText] = useState("");
     const [confidence, setConfidence] = useState<number | null>(null);
     const [provider, setProvider] = useState<string>("");
-    const [isExtracting, setIsExtracting] = useState(false);
-    const [extractError, setExtractError] = useState<string | null>(null);
-    const [extractCorrelationId, setExtractCorrelationId] = useState<string | null>(null);
+    const [isProcessing, setIsProcessing] = useState(false);
+    const [processStage, setProcessStage] = useState<"extracting" | "analyzing" | null>(null);
+    const [processError, setProcessError] = useState<string | null>(null);
+    const [processCorrelationId, setProcessCorrelationId] = useState<string | null>(null);
 
-    const [draft, setDraft] = useState<InvoiceDraft | null>(null);
-    const [analysis, setAnalysis] = useState<AnalysisResult | null>(null);
-    const [isAnalyzing, setIsAnalyzing] = useState(false);
-    const [analysisError, setAnalysisError] = useState<string | null>(null);
-    const [analysisCorrelationId, setAnalysisCorrelationId] = useState<string | null>(null);
-    const [qaCorrelationId, setQaCorrelationId] = useState<string | null>(null);
-
-    const [question, setQuestion] = useState("");
-    const [chat, setChat] = useState<ChatMessage[]>([]);
-    const [asking, setAsking] = useState(false);
+    const [draft, setDraft] = useState<InvoiceExtraction | null>(null);
+    const [copied, setCopied] = useState(false);
     const [outputFormat, setOutputFormat] = useState<OutputFormat>("journal");
     const [usage, setUsage] = useState<UsageLimitState>({
         loading: true,
         isAuthenticated: false,
         usedToday: 0,
-        limit: 3,
-        remaining: 3,
+        limit: 30,
+        remaining: 30,
         limitReached: false,
     });
 
@@ -129,247 +182,195 @@ export default function InvoiceParserTool() {
         });
     }, []);
 
-    const outputPreview = useMemo(() => {
-        if (!draft) return "";
+    // Derived state — recomputes whenever the user edits any field
+    const vatClass = useMemo(() => (draft ? classifyVAT(draft) : null), [draft]);
+    const expenseCategory = useMemo(() => (draft ? categoriseExpense(draft) : null), [draft]);
+    const summary = useMemo(() => {
+        if (!draft || !vatClass || !expenseCategory) return "";
+        return buildSummary(draft, vatClass, expenseCategory);
+    }, [draft, vatClass, expenseCategory]);
 
-        const total = parseAmount(draft.totalAmount);
-        const vat = parseAmount(draft.vatAmount);
+    // Always journal format — used by the copy button regardless of selected output
+    const journalLines = useMemo(() => {
+        if (!draft || !expenseCategory) return "";
+        const total = draft.total_amount;
+        const vat = draft.vat_amount;
         const net = Math.max(total - vat, 0);
+        const cat = expenseCategory.matched ? expenseCategory.category : "General";
+        return [
+            "Date,Account,Debit,Credit,Description",
+            `${draft.invoice_date || ""},Expense (${cat}),${net.toFixed(2)},,${draft.supplier_name}`,
+            `${draft.invoice_date || ""},VAT Input,${vat.toFixed(2)},,Reclaimable VAT`,
+            `${draft.invoice_date || ""},Bank/Payables,,${total.toFixed(2)},Invoice ${draft.invoice_number || ""}`,
+        ].join("\n");
+    }, [draft, expenseCategory]);
 
-        if (outputFormat === "journal") {
-            return [
-                "Date,Account,Debit,Credit,Description",
-                `${draft.invoiceDate || ""},Expense (${analysis?.category || "General"}),${net.toFixed(2)},,${draft.vendorName}`,
-                `${draft.invoiceDate || ""},VAT Input,${vat.toFixed(2)},,Reclaimable VAT`,
-                `${draft.invoiceDate || ""},Bank/Payables,,${total.toFixed(2)},Invoice ${draft.invoiceNumber || ""}`,
-            ].join("\n");
-        }
+    const outputPreview = useMemo(() => {
+        if (!draft || !vatClass || !expenseCategory) return "";
+        const total = draft.total_amount;
+        const vat = draft.vat_amount;
+        const net = Math.max(total - vat, 0);
+        const cat = expenseCategory.matched ? expenseCategory.category : "General";
+        const code = expenseCategory.matched ? expenseCategory.code : "7000";
+
+        if (outputFormat === "journal") return journalLines;
 
         if (outputFormat === "xero") {
             return [
                 "Date,Amount,Payee,Description,Reference,TaxType,AccountCode",
-                `${csvEscape(draft.invoiceDate || "")},${total.toFixed(2)},${csvEscape(draft.vendorName)},${csvEscape(analysis?.category || "Expense")},${csvEscape(draft.invoiceNumber || "")},${vat > 0 ? "INPUT2" : "NONE"},${analysis?.ukAccountingCode || "400"}`,
+                `${csvEscape(draft.invoice_date || "")},${total.toFixed(2)},${csvEscape(draft.supplier_name)},${csvEscape(cat)},${csvEscape(draft.invoice_number || "")},${vat > 0 ? "INPUT2" : "NONE"},${code}`,
             ].join("\n");
         }
 
         if (outputFormat === "csv") {
             const header = "Vendor,Invoice Number,Date,Line Description,Line Amount,VAT,Total";
-            const rows = draft.lineItems.map((item) =>
+            const rows = draft.line_items.map((item) =>
                 [
-                    csvEscape(draft.vendorName),
-                    csvEscape(draft.invoiceNumber),
-                    csvEscape(draft.invoiceDate),
+                    csvEscape(draft.supplier_name),
+                    csvEscape(draft.invoice_number),
+                    csvEscape(draft.invoice_date),
                     csvEscape(item.description),
-                    csvEscape(item.amount),
-                    csvEscape(draft.vatAmount),
-                    csvEscape(draft.totalAmount),
+                    csvEscape(item.line_total.toString()),
+                    csvEscape(vat.toString()),
+                    csvEscape(total.toString()),
                 ].join(",")
             );
             return [header, ...rows].join("\n");
         }
 
+        // summary
         return [
-            `Invoice from ${draft.vendorName}`,
-            `Invoice #: ${draft.invoiceNumber || "N/A"}`,
-            `Date: ${draft.invoiceDate || "N/A"}`,
-            `Total: ${draft.totalAmount || "N/A"}`,
-            `VAT: ${draft.vatAmount || "N/A"}`,
+            `Invoice from ${draft.supplier_name}`,
+            `Invoice #: ${draft.invoice_number || "N/A"}`,
+            `Date: ${draft.invoice_date || "N/A"}`,
+            `Total: ${draft.currency} ${total.toFixed(2)}`,
+            `VAT: ${draft.currency} ${vat.toFixed(2)} (${VAT_LABEL[vatClass.treatment] ?? vatClass.treatment})`,
+            `Net: ${draft.currency} ${net.toFixed(2)}`,
+            `Category: ${cat} · code ${code}`,
             "",
-            analysis?.summary || "No AI summary generated.",
+            summary,
             "",
-            ...(analysis?.warnings?.length ? ["Warnings:", ...analysis.warnings.map((w) => `- ${w}`)] : ["Warnings: None"]),
+            ...(vatClass.flags.length ? ["VAT notes:", ...vatClass.flags.map((f) => `- ${f}`)] : []),
         ].join("\n");
-    }, [analysis, draft, outputFormat]);
+    }, [draft, vatClass, expenseCategory, outputFormat, journalLines, summary]);
+
+    // ── upload handler — OCR then AI extraction in one user wait ─────────────
 
     const onFilePick = async (file: File) => {
         const correlationId = generateCorrelationId();
-        setExtractError(null);
-        if (!usage.isAuthenticated && usage.limitReached) {
-            setExtractError("Daily free limit reached. Please sign up to continue.");
-            return;
-        }
+        setProcessError(null);
+        setProcessCorrelationId(null);
 
-        if (!["application/pdf", "image/png", "image/jpeg", "image/jpg"].includes(file.type)) {
-            setExtractError("Please upload a PDF, PNG, or JPG file.");
+        if (!usage.isAuthenticated && usage.limitReached) {
+            setProcessError("Daily free limit reached. Please sign up to continue.");
             return;
         }
-        if (file.size > MAX_MB * 1024 * 1024) {
-            setExtractError("File must be 10MB or smaller.");
+        if (!["application/pdf", "image/png", "image/jpeg", "image/jpg"].includes(file.type)) {
+            setProcessError("Please upload a PDF, PNG, or JPG file.");
+            return;
+        }
+        if (file.size > 10 * 1024 * 1024) {
+            setProcessError("File must be 10MB or smaller.");
             return;
         }
 
         setSelectedFile(file);
-        setIsExtracting(true);
+        setIsProcessing(true);
+        setProcessStage("extracting");
 
         try {
             if (!usage.isAuthenticated) {
                 await recordAnonymousUsage().then(setUsage);
             }
 
+            // Phase 1 — OCR text extraction
             const form = new FormData();
             form.append("file", file);
-
             console.info("[invoice-parser]", {
-                stage: "extract_fetch",
-                correlationId,
-                url: "/api/extract-text",
+                stage: "extract_fetch", correlationId,
                 payload: { fileName: file.name, fileSize: file.size, fileType: file.type },
             });
 
-            const res = await fetch("/api/extract-text", {
+            const extractRes = await fetch("/api/extract-text", {
                 method: "POST",
                 body: form,
                 headers: { "x-file-name": file.name, "x-correlation-id": correlationId },
             });
-            const serverCorrelationId = res.headers.get("x-correlation-id");
+            const extractData = await extractRes.json();
+            if (!extractRes.ok) throw new Error(extractData?.detail || extractData?.error || "Failed to extract text.");
+
+            const rawText: string = extractData.rawText || "";
+            setConfidence(typeof extractData.confidence === "number" ? extractData.confidence : null);
+            setProvider(extractData.providerUsed || "ocr");
 
             console.info("[invoice-parser]", {
-                stage: "extract_response",
-                correlationId,
-                status: res.status,
-                serverCorrelationId,
+                stage: "extract_ok", correlationId,
+                rawTextLength: rawText.length, status: extractRes.status,
+                serverCorrelationId: extractRes.headers.get("x-correlation-id"),
             });
 
-            const data = await res.json();
-            if (!res.ok) throw new Error(data?.detail || data?.error || "Failed to extract text.");
+            // Phase 2 — AI field extraction into InvoiceExtraction schema
+            setProcessStage("analyzing");
+            console.info("[invoice-parser]", { stage: "analyze_fetch", correlationId, rawTextLength: rawText.length });
 
-            const extractedText = data.rawText || "";
-            setRawText(extractedText);
-            setConfidence(typeof data.confidence === "number" ? data.confidence : null);
-            setProvider(data.providerUsed || "ocr");
-            setDraft(buildFallbackDraft(extractedText));
+            const analyzeRes = await fetch("/api/invoice-analyze", {
+                method: "POST",
+                headers: { "Content-Type": "application/json", "x-correlation-id": correlationId },
+                body: JSON.stringify({ rawText }),
+            });
+            const analyzeData = await analyzeRes.json();
+
+            console.info("[invoice-parser]", {
+                stage: "analyze_ok", correlationId,
+                status: analyzeRes.status,
+                serverCorrelationId: analyzeRes.headers.get("x-correlation-id"),
+            });
+
+            if (!analyzeRes.ok) throw new Error(analyzeData?.error || "Analysis failed.");
+
+            // Prefer AI extraction; fall back to regex if extraction is absent
+            setDraft(analyzeData.extraction ?? buildFallbackDraft(rawText));
             setStep(2);
         } catch (err) {
             const errorType = err instanceof TypeError ? "network" : "http";
-            const message = err instanceof Error ? err.message : "Extraction failed.";
+            const message = err instanceof Error ? err.message : "Processing failed.";
             console.error("[invoice-parser]", {
-                stage: "extract_error",
-                correlationId,
-                errorType,
-                message,
-                hint: errorType === "network" ? "Request never reached the server — check connectivity or CORS" : "Server returned a non-OK response",
+                stage: "process_error", correlationId, errorType, message,
+                hint: errorType === "network"
+                    ? "Request never reached the server — check connectivity or CORS"
+                    : "Server returned a non-OK response",
             });
-            setExtractError(message);
-            setExtractCorrelationId(correlationId);
+            setProcessError(message);
+            setProcessCorrelationId(correlationId);
         } finally {
-            setIsExtracting(false);
+            setIsProcessing(false);
+            setProcessStage(null);
         }
     };
 
-    const analyzeInvoice = async () => {
-        if (!draft) return;
-        const correlationId = generateCorrelationId();
-        setIsAnalyzing(true);
-        setAnalysisError(null);
+    const copyJournal = async () => {
         try {
-            console.info("[invoice-parser]", {
-                stage: "analyze_fetch",
-                correlationId,
-                url: "/api/invoice-analyze",
-                payload: { hasRawText: rawText.length > 0, rawTextLength: rawText.length, invoiceKeys: Object.keys(draft) },
-            });
-
-            const res = await fetch("/api/invoice-analyze", {
-                method: "POST",
-                headers: { "Content-Type": "application/json", "x-correlation-id": correlationId },
-                body: JSON.stringify({ rawText, invoice: draft }),
-            });
-            const serverCorrelationId = res.headers.get("x-correlation-id");
-
-            console.info("[invoice-parser]", {
-                stage: "analyze_response",
-                correlationId,
-                status: res.status,
-                serverCorrelationId,
-            });
-
-            const data = await res.json();
-            if (!res.ok) throw new Error(data?.error || "Analysis failed.");
-            setAnalysis(data.analysis);
-            setStep(3);
-        } catch (err) {
-            const errorType = err instanceof TypeError ? "network" : "http";
-            const message = err instanceof Error ? err.message : "Failed to analyze invoice.";
-            console.error("[invoice-parser]", {
-                stage: "analyze_error",
-                correlationId,
-                errorType,
-                message,
-                hint: errorType === "network" ? "Request never reached the server — check connectivity or CORS" : "Server returned a non-OK response",
-            });
-            setAnalysisError(message);
-            setAnalysisCorrelationId(correlationId);
-        } finally {
-            setIsAnalyzing(false);
-        }
-    };
-
-    const askQuestion = async () => {
-        if (!question.trim() || !draft) return;
-        const correlationId = generateCorrelationId();
-        const q = question.trim();
-        setQuestion("");
-        setAsking(true);
-        setChat((prev) => [...prev, { role: "user", content: q }]);
-
-        try {
-            console.info("[invoice-parser]", {
-                stage: "qa_fetch",
-                correlationId,
-                url: "/api/invoice-analyze",
-                payload: { questionLength: q.length, hasAnalysis: !!analysis, invoiceKeys: Object.keys(draft) },
-            });
-
-            const res = await fetch("/api/invoice-analyze", {
-                method: "POST",
-                headers: { "Content-Type": "application/json", "x-correlation-id": correlationId },
-                body: JSON.stringify({ rawText, invoice: draft, question: q, analysis }),
-            });
-            const serverCorrelationId = res.headers.get("x-correlation-id");
-
-            console.info("[invoice-parser]", {
-                stage: "qa_response",
-                correlationId,
-                status: res.status,
-                serverCorrelationId,
-            });
-
-            const data = await res.json();
-            if (!res.ok) throw new Error(data?.error || "Unable to answer right now.");
-            setChat((prev) => [...prev, { role: "assistant", content: data.answer || "I couldn't generate an answer." }]);
-        } catch (err) {
-            const errorType = err instanceof TypeError ? "network" : "http";
-            const message = err instanceof Error ? err.message : "Unable to answer right now.";
-            console.error("[invoice-parser]", {
-                stage: "qa_error",
-                correlationId,
-                errorType,
-                message,
-                hint: errorType === "network" ? "Request never reached the server — check connectivity or CORS" : "Server returned a non-OK response",
-            });
-            setQaCorrelationId(correlationId);
-            setChat((prev) => [...prev, { role: "assistant", content: message }]);
-        } finally {
-            setAsking(false);
+            await navigator.clipboard.writeText(journalLines);
+            setCopied(true);
+            setTimeout(() => setCopied(false), 2000);
+        } catch {
+            // clipboard unavailable — silent fail
         }
     };
 
     const processAnother = () => {
         setStep(1);
         setSelectedFile(null);
-        setRawText("");
         setConfidence(null);
         setProvider("");
         setDraft(null);
-        setAnalysis(null);
-        setChat([]);
-        setExtractError(null);
-        setExtractCorrelationId(null);
-        setAnalysisError(null);
-        setAnalysisCorrelationId(null);
-        setQaCorrelationId(null);
+        setProcessError(null);
+        setProcessCorrelationId(null);
+        setCopied(false);
         setOutputFormat("journal");
     };
+
+    // ── render ────────────────────────────────────────────────────────────────
 
     return (
         <div className="rounded-2xl border border-slate-200 bg-white p-6 sm:p-8 shadow-sm">
@@ -378,23 +379,25 @@ export default function InvoiceParserTool() {
             </div>
 
             {!usage.loading && !usage.isAuthenticated && (
-                <p className="mb-4 text-xs text-slate-500">Free usage: {usage.usedToday}/{usage.limit} used today across all tools.</p>
+                <p className="mb-4 text-xs text-slate-500">
+                    Free usage: {usage.usedToday}/{usage.limit} used today across all tools.
+                </p>
             )}
 
             {!usage.loading && !usage.isAuthenticated && usage.limitReached && (
-                <div className="mb-4">
-                    <UsageLimitGate />
-                </div>
+                <div className="mb-4"><UsageLimitGate /></div>
             )}
 
+            {/* Step indicators */}
             <div className="mb-8 flex flex-wrap gap-2 text-sm">
-                {[1, 2, 3, 4].map((n) => (
+                {([1, 2, 3] as const).map((n) => (
                     <span key={n} className={`px-3 py-1 rounded-full border ${step >= n ? "bg-[#566AF0] text-white border-[#566AF0]" : "bg-white text-slate-500 border-slate-300"}`}>
                         Step {n}
                     </span>
                 ))}
             </div>
 
+            {/* ── Step 1: Upload ─────────────────────────────────────────────── */}
             {step === 1 && (
                 <div>
                     <label
@@ -413,43 +416,120 @@ export default function InvoiceParserTool() {
                         <p className="mt-2 text-sm text-slate-500">PDF, PNG, JPG up to 10MB. Tap to choose file.</p>
                         {selectedFile && <p className="mt-4 text-sm text-slate-600">Selected: {selectedFile.name}</p>}
                     </label>
-                    <input id="invoice-file" type="file" accept="application/pdf,image/png,image/jpeg" className="hidden" onChange={(e) => e.target.files?.[0] && onFilePick(e.target.files[0])} disabled={!usage.loading && !usage.isAuthenticated && usage.limitReached} />
-                    {isExtracting && <p className="mt-4 text-sm text-slate-600">Processing invoice...</p>}
-                    {extractError && (
+                    <input
+                        id="invoice-file"
+                        type="file"
+                        accept="application/pdf,image/png,image/jpeg"
+                        className="hidden"
+                        onChange={(e) => e.target.files?.[0] && onFilePick(e.target.files[0])}
+                        disabled={!usage.loading && !usage.isAuthenticated && usage.limitReached}
+                    />
+                    {isProcessing && (
+                        <p className="mt-4 text-sm text-slate-600 animate-pulse">
+                            {processStage === "extracting" ? "Extracting text from invoice…" : "Analysing invoice fields…"}
+                        </p>
+                    )}
+                    {processError && (
                         <div className="mt-4">
-                            <p className="text-sm text-red-600">{extractError}</p>
-                            {extractCorrelationId && <p className="text-xs text-slate-400 mt-0.5">Ref: {extractCorrelationId}</p>}
+                            <p className="text-sm text-red-600">{processError}</p>
+                            {processCorrelationId && <p className="text-xs text-slate-400 mt-0.5">Ref: {processCorrelationId}</p>}
                         </div>
                     )}
                 </div>
             )}
 
-            {step >= 2 && draft && (
-                <div className="space-y-5">
-                    <h3 className="text-xl font-semibold text-slate-900">Preview extracted data</h3>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        {([
-                            ["Vendor name", "vendorName"],
-                            ["Invoice number", "invoiceNumber"],
-                            ["Date", "invoiceDate"],
-                            ["Total amount", "totalAmount"],
-                            ["VAT amount", "vatAmount"],
-                        ] as const).map(([label, key]) => (
-                            <label key={key} className="text-sm text-slate-600">
-                                {label}
-                                <input
-                                    className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900"
-                                    value={draft[key]}
-                                    onChange={(e) => setDraft((prev) => (prev ? { ...prev, [key]: e.target.value } : prev))}
-                                />
-                            </label>
-                        ))}
+            {/* ── Step 2: Instant result ─────────────────────────────────────── */}
+            {step === 2 && draft && vatClass && expenseCategory && (
+                <div className="space-y-6">
+                    <h3 className="text-xl font-semibold text-slate-900">Review extracted data</h3>
+
+                    {/* Badges */}
+                    <div className="flex flex-wrap gap-2">
+                        {(() => {
+                            const variant = vatBadgeVariant(vatClass);
+                            return (
+                                <span className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-sm font-medium ${BADGE_CLASSES[variant]}`}>
+                                    <span>{BADGE_ICON[variant]}</span>
+                                    {VAT_LABEL[vatClass.treatment] ?? vatClass.treatment}
+                                </span>
+                            );
+                        })()}
+                        {expenseCategory.matched ? (
+                            <span className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-sm font-medium text-slate-700">
+                                {expenseCategory.category}
+                                <span className="text-xs text-slate-400">· {expenseCategory.code}</span>
+                            </span>
+                        ) : (
+                            <span className="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-sm text-slate-500">
+                                Category: needs review
+                            </span>
+                        )}
                     </div>
 
+                    {/* Plain English summary */}
+                    <p className="text-sm text-slate-600 leading-relaxed rounded-lg bg-slate-50 border border-slate-200 px-4 py-3">
+                        {summary}
+                    </p>
+
+                    {/* VAT flags */}
+                    {vatClass.flags.length > 0 && (
+                        <ul className="space-y-1">
+                            {vatClass.flags.map((flag, i) => (
+                                <li key={i} className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-3 py-2">
+                                    {flag}
+                                </li>
+                            ))}
+                        </ul>
+                    )}
+
+                    {/* Editable fields with per-field confidence dots */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        {([
+                            ["Supplier name", "supplier_name"],
+                            ["Invoice number", "invoice_number"],
+                            ["Date", "invoice_date"],
+                        ] as const).map(([label, key]) => {
+                            const conf = draft.extraction_confidence.per_field[key];
+                            return (
+                                <label key={key} className="text-sm text-slate-600">
+                                    <span className="flex items-center gap-1.5 mb-1">
+                                        {label}
+                                        <ConfidenceDot level={conf} />
+                                    </span>
+                                    <input
+                                        className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900"
+                                        value={draft[key] ?? ""}
+                                        onChange={(e) => setDraft((prev) => (prev ? { ...prev, [key]: e.target.value } : prev))}
+                                    />
+                                </label>
+                            );
+                        })}
+                        {([
+                            ["Total amount", "total_amount"],
+                            ["VAT amount", "vat_amount"],
+                        ] as const).map(([label, key]) => {
+                            const conf = draft.extraction_confidence.per_field[key];
+                            return (
+                                <label key={key} className="text-sm text-slate-600">
+                                    <span className="flex items-center gap-1.5 mb-1">
+                                        {label}
+                                        <ConfidenceDot level={conf} />
+                                    </span>
+                                    <input
+                                        className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900"
+                                        value={draft[key].toString()}
+                                        onChange={(e) => setDraft((prev) => (prev ? { ...prev, [key]: parseAmount(e.target.value) } : prev))}
+                                    />
+                                </label>
+                            );
+                        })}
+                    </div>
+
+                    {/* Line items */}
                     <div>
                         <p className="text-sm font-medium text-slate-700 mb-2">Line items</p>
                         <div className="space-y-2">
-                            {draft.lineItems.map((item, idx) => (
+                            {draft.line_items.map((item, idx) => (
                                 <div key={idx} className="grid grid-cols-1 md:grid-cols-3 gap-2">
                                     <input
                                         className="md:col-span-2 rounded-lg border border-slate-300 px-3 py-2 text-sm"
@@ -457,21 +537,21 @@ export default function InvoiceParserTool() {
                                         onChange={(e) =>
                                             setDraft((prev) => {
                                                 if (!prev) return prev;
-                                                const lineItems = [...prev.lineItems];
-                                                lineItems[idx] = { ...lineItems[idx], description: e.target.value };
-                                                return { ...prev, lineItems };
+                                                const line_items = [...prev.line_items];
+                                                line_items[idx] = { ...line_items[idx], description: e.target.value };
+                                                return { ...prev, line_items };
                                             })
                                         }
                                     />
                                     <input
                                         className="rounded-lg border border-slate-300 px-3 py-2 text-sm"
-                                        value={item.amount}
+                                        value={item.line_total.toString()}
                                         onChange={(e) =>
                                             setDraft((prev) => {
                                                 if (!prev) return prev;
-                                                const lineItems = [...prev.lineItems];
-                                                lineItems[idx] = { ...lineItems[idx], amount: e.target.value };
-                                                return { ...prev, lineItems };
+                                                const line_items = [...prev.line_items];
+                                                line_items[idx] = { ...line_items[idx], line_total: parseAmount(e.target.value) };
+                                                return { ...prev, line_items };
                                             })
                                         }
                                     />
@@ -480,68 +560,25 @@ export default function InvoiceParserTool() {
                         </div>
                     </div>
 
-                    <p className="text-sm text-slate-500">OCR confidence: {confidence != null ? `${Math.round((confidence <= 1 ? confidence * 100 : confidence))}%` : "N/A"} {provider ? `• via ${provider}` : ""}</p>
+                    <p className="text-sm text-slate-500">
+                        OCR confidence: {confidence != null ? `${Math.round(confidence <= 1 ? confidence * 100 : confidence)}%` : "N/A"}
+                        {provider ? ` · via ${provider}` : ""}
+                    </p>
 
-                    {step === 2 && (
-                        <button onClick={analyzeInvoice} disabled={isAnalyzing} className="rounded-full bg-[#566AF0] px-6 py-2.5 text-white font-semibold hover:bg-[#4355d6] disabled:opacity-70">
-                            {isAnalyzing ? "Analyzing..." : "Analyze invoice"}
-                        </button>
-                    )}
-
-                    {analysisError && (
-                        <div>
-                            <p className="text-sm text-red-600">{analysisError}</p>
-                            {analysisCorrelationId && <p className="text-xs text-slate-400 mt-0.5">Ref: {analysisCorrelationId}</p>}
-                        </div>
-                    )}
+                    <button
+                        onClick={() => setStep(3)}
+                        className="rounded-full bg-[#566AF0] px-6 py-2.5 text-white font-semibold hover:bg-[#4355d6]"
+                    >
+                        Looks right →
+                    </button>
                 </div>
             )}
 
-            {step >= 3 && analysis && (
-                <div className="mt-8 space-y-4 border-t border-slate-200 pt-6">
-                    <h3 className="text-xl font-semibold text-slate-900">AI explanation</h3>
-                    <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 space-y-2">
-                        <p className="font-semibold text-slate-900">{analysis.deductibleStatus === "fully" ? "✓ Fully deductible" : "⚠️ Partially deductible"}</p>
-                        <p className="text-slate-700 text-sm">{analysis.reason}</p>
-                        <p className="text-sm"><span className="font-medium">VAT reclaimable:</span> {analysis.vatReclaimableAmount}</p>
-                        <p className="text-sm"><span className="font-medium">Category:</span> {analysis.category}</p>
-                        <p className="text-sm"><span className="font-medium">UK accounting code:</span> {analysis.ukAccountingCode}</p>
-                        {(analysis.warnings?.length ?? 0) > 0 && (
-                            <ul className="list-disc ml-5 text-sm text-amber-700">
-                                {analysis.warnings.map((w) => <li key={w}>{w}</li>)}
-                            </ul>
-                        )}
-                    </div>
-
-                    <div className="rounded-xl border border-slate-200 p-4">
-                        <p className="font-medium text-slate-900 mb-3">Ask a question about this invoice</p>
-                        <div className="flex gap-2">
-                            <input value={question} onChange={(e) => setQuestion(e.target.value)} placeholder="e.g. Can I claim this if I work from home?" className="flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm" />
-                            <button onClick={askQuestion} disabled={asking} className="rounded-lg bg-slate-900 text-white px-4 py-2 text-sm disabled:opacity-70">Ask</button>
-                        </div>
-                        <div className="mt-4 space-y-3">
-                            {chat.map((m, idx) => {
-                                const isLastAssistant = m.role === "assistant" && idx === chat.length - 1;
-                                return (
-                                    <div key={idx} className={`rounded-lg px-3 py-2 text-sm ${m.role === "user" ? "bg-blue-50 text-blue-900" : "bg-slate-100 text-slate-800"}`}>
-                                        <strong className="mr-1">{m.role === "user" ? "You:" : "AI:"}</strong>
-                                        {m.content}
-                                        {isLastAssistant && qaCorrelationId && (
-                                            <p className="text-xs text-slate-400 mt-0.5">Ref: {qaCorrelationId}</p>
-                                        )}
-                                    </div>
-                                );
-                            })}
-                        </div>
-                    </div>
-
-                    <button onClick={() => setStep(4)} className="rounded-full border border-slate-300 px-6 py-2.5 text-slate-700 font-semibold hover:bg-slate-50">Continue to outputs</button>
-                </div>
-            )}
-
-            {step === 4 && draft && (
-                <div className="mt-8 space-y-4 border-t border-slate-200 pt-6">
+            {/* ── Step 3: Outputs ────────────────────────────────────────────── */}
+            {step === 3 && draft && (
+                <div className="space-y-4">
                     <h3 className="text-xl font-semibold text-slate-900">Generate outputs</h3>
+
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-sm">
                         {([
                             ["journal", "Journal Entries"],
@@ -556,13 +593,32 @@ export default function InvoiceParserTool() {
                         ))}
                     </div>
 
-                    <pre className="max-h-64 overflow-auto rounded-xl bg-slate-900 text-slate-100 p-4 text-xs whitespace-pre-wrap">{outputPreview}</pre>
+                    <pre className="max-h-64 overflow-auto rounded-xl bg-slate-900 text-slate-100 p-4 text-xs whitespace-pre-wrap">
+                        {outputPreview}
+                    </pre>
+
                     <div className="flex flex-wrap gap-3">
-                        <button onClick={() => downloadText(outputPreview, `invoice-${outputFormat}.${outputFormat === "summary" ? "txt" : "csv"}`, outputFormat === "summary" ? "text/plain" : "text/csv")}
-                            className="rounded-full bg-[#566AF0] text-white px-6 py-2.5 font-semibold hover:bg-[#4355d6]">
+                        <button
+                            onClick={copyJournal}
+                            className="rounded-full border border-[#566AF0] text-[#566AF0] px-6 py-2.5 font-semibold hover:bg-[#566AF0] hover:text-white transition-colors"
+                        >
+                            {copied ? "Copied!" : "Copy journal entry"}
+                        </button>
+                        <button
+                            onClick={() => downloadText(
+                                outputPreview,
+                                `invoice-${outputFormat}.${outputFormat === "summary" ? "txt" : "csv"}`,
+                                outputFormat === "summary" ? "text/plain" : "text/csv",
+                            )}
+                            className="rounded-full bg-[#566AF0] text-white px-6 py-2.5 font-semibold hover:bg-[#4355d6]"
+                        >
                             Download output
                         </button>
-                        <button className="rounded-full border border-slate-300 px-6 py-2.5 text-slate-600" disabled title="Requires login integration">
+                        <button
+                            className="rounded-full border border-slate-300 px-6 py-2.5 text-slate-600"
+                            disabled
+                            title="Requires login integration"
+                        >
                             Save to history (optional)
                         </button>
                         <button onClick={processAnother} className="rounded-full border border-slate-300 px-6 py-2.5 text-slate-700">

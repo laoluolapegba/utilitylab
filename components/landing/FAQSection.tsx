@@ -10,7 +10,7 @@ const faqs = [
     },
     {
         question: "Which tools are currently available?",
-        answer: "Image to Text is live and ready to use with 3 free conversions daily. We're actively developing PDF to Accounting, Image Format Converter, E-commerce tools, and UK Compliance Form Generator."
+        answer: "Image to Text is live and ready to use with 30 free conversions daily. We're actively developing PDF to Accounting, Image Format Converter, E-commerce tools, and UK Compliance Form Generator."
     },
     {
         question: "Is my data safe and private?",
@@ -22,7 +22,7 @@ const faqs = [
     },
     {
         question: "What's included in the free tier?",
-        answer: "Free users get 3 daily conversions for Image to Text, access to all file formats, and standard processing speed. No credit card required."
+        answer: "Free users get 30 daily conversions for Image to Text, access to all file formats, and standard processing speed. No credit card required."
     },
     {
         question: "When will Pro plans be available?",

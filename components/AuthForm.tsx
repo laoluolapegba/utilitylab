@@ -126,7 +126,7 @@ export default function AuthForm() {
                 <div className="relative z-10 flex items-center gap-6 text-xs text-slate-500">
                     <span className="flex items-center gap-1.5">
                         <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
-                        3 free uses/day
+                        30 free uses/day
                     </span>
                     <span className="flex items-center gap-1.5">
                         <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />

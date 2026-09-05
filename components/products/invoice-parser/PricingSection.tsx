@@ -2,7 +2,7 @@ import { Check, ArrowRight } from "lucide-react";
 import Link from "next/link";
 
 const included = [
-    "3 free invoice parses per day — no card required",
+    "30 free invoice parses per day — no card required",
     "PDF, PNG, and JPG invoice support up to 10 MB",
     "UK VAT analysis and deductibility guidance",
     "Xero CSV, journal entry, and plain-English export",

@@ -12,8 +12,8 @@ import { supabaseAdmin } from "./supabaseServer";
 // ── Plan limits (requests per calendar day, UTC) ──────────────────────────────
 
 const PLAN_LIMIT: Record<string, number> = {
-    anon:    3,
-    free:    3,
+    anon:    30,
+    free:    30,
     starter: 50,
     pro:     2_147_483_647, // pg INTEGER max — treated as unlimited in the RPC
 };

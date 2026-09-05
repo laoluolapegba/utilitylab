@@ -22,7 +22,7 @@ const faqs = [
     },
     {
         question: "How many images can I convert for free?",
-        answer: "Free users get 3 conversions per day. No credit card required. Pro users (coming soon) will get unlimited conversions with additional features like batch processing and API access."
+        answer: "Free users get 30 conversions per day. No credit card required. Pro users (coming soon) will get unlimited conversions with additional features like batch processing and API access."
     },
     {
         question: "Can I extract text from handwritten notes?",
